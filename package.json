@@ -6,10 +6,17 @@
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "cd server && npm run dev",
     "client": "cd client && npm start",
-    "install-all": "npm install && cd server && npm install && cd ../client && npm install",
+    "install-all": "npm install && cd server && npm install && cd ../client && npm install && cd ../functions && npm install",
     "build": "cd client && npm run build",
     "start": "cd server && npm start",
-    "test-hubspot": "node test-hubspot.js"
+    "test-hubspot": "node test-hubspot.js",
+    "build:client": "cd client && npm run build",
+    "build:functions": "cd functions && npm run build",
+    "deploy": "npm run build:client && npm run build:functions && npx firebase deploy",
+    "deploy:hosting": "npm run build:client && npx firebase deploy --only hosting",
+    "deploy:functions": "npm run build:functions && npx firebase deploy --only functions",
+    "test:firebase": "node test-firebase-functions.js",
+    "emulator": "npx firebase emulators:start"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

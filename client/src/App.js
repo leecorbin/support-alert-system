@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Headphones, MessageCircle, Mail, Users, User } from "lucide-react";
 import axios from "axios";
+import { API_ENDPOINTS } from "./config/api";
 
 const App = () => {
   const [supportData, setSupportData] = useState(null);
@@ -11,14 +12,14 @@ const App = () => {
   const fetchSupportData = async () => {
     try {
       setError(null);
-      // Use relative URL so it works both in development and production
-      const response = await axios.get("/api/support");
+      // Use Firebase Functions endpoint
+      const response = await axios.get(API_ENDPOINTS.SUPPORT);
       setSupportData(response.data);
       setIsOnline(true);
     } catch (err) {
       console.error("Error fetching support data:", err);
       setError(
-        "Failed to fetch support data. Please check if the server is running."
+        "Failed to fetch support data. Please check if the Firebase Functions are deployed."
       );
       setIsOnline(false);
     } finally {
