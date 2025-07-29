@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -11,6 +12,9 @@ app.use(helmet());
 app.use(cors());
 app.use(morgan("combined"));
 app.use(express.json());
+
+// Serve static files from React build
+app.use(express.static(path.join(__dirname, "public")));
 
 // In-memory storage for support data
 let supportData = {
@@ -110,11 +114,9 @@ app.get("/api/support", (req, res) => {
   }
 });
 
-// 404 handler
-app.use("*", (req, res) => {
-  res.status(404).json({
-    error: "Endpoint not found",
-  });
+// Serve React app for all non-API routes
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 // Error handler

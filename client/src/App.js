@@ -11,6 +11,7 @@ const App = () => {
   const fetchSupportData = async () => {
     try {
       setError(null);
+      // Use relative URL so it works both in development and production
       const response = await axios.get("/api/support");
       setSupportData(response.data);
       setIsOnline(true);
