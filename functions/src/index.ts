@@ -1,9 +1,9 @@
-import {onRequest} from "firebase-functions/v2/https";
+import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as cors from "cors";
 
 // Enable CORS for all requests
-const corsHandler = cors.default({origin: true});
+const corsHandler = cors.default({ origin: true });
 
 // In-memory storage for support data
 let supportData = {
@@ -42,7 +42,7 @@ export const support = onRequest((request, response) => {
 
       if (request.method === "POST") {
         // Update support data from HubSpot
-        const {tickets, sessions} = request.body;
+        const { tickets, sessions } = request.body;
 
         // Validate required fields
         if (!tickets || !sessions) {

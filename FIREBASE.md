@@ -37,6 +37,7 @@ firebase deploy
 ```
 
 Your functions will be available at:
+
 - **Support API**: `https://us-central1-support-alert-system-385b1.cloudfunctions.net/support`
 - **Health Check**: `https://us-central1-support-alert-system-385b1.cloudfunctions.net/health`
 
@@ -54,11 +55,13 @@ firebase deploy
 ```
 
 Your app will be available at:
+
 - **Dashboard**: `https://support-alert-system-385b1.web.app`
 
 ## Step 4: Configure HubSpot Webhook
 
 Set your HubSpot webhook URL to:
+
 ```
 https://us-central1-support-alert-system-385b1.cloudfunctions.net/support
 ```
@@ -83,16 +86,19 @@ Add these to your root `package.json`:
 ## Testing
 
 ### Test Firebase Functions
+
 ```bash
 npm run test:firebase
 ```
 
 ### Test React App Locally (with deployed functions)
+
 ```bash
 cd client && npm start
 ```
 
 ### Firebase Emulator Suite (Development)
+
 ```bash
 # Start emulators
 firebase emulators:start
@@ -123,42 +129,50 @@ Commits to `main` branch will automatically deploy to Firebase Hosting.
 ## Monitoring and Logs
 
 ### View Function Logs
+
 ```bash
 firebase functions:log
 ```
 
 ### View Real-time Logs
+
 ```bash
 firebase functions:log --follow
 ```
 
 ### Firebase Console
+
 - **Functions**: https://console.firebase.google.com/project/support-alert-system-385b1/functions
 - **Hosting**: https://console.firebase.google.com/project/support-alert-system-385b1/hosting
 
 ## Cost Considerations
 
 ### Firebase Functions (Blaze Plan)
+
 - **Free Tier**: 2M invocations/month, 400K GB-seconds/month
 - **Pricing**: $0.40/M invocations, $0.0025/GB-second
 - **Estimate**: For typical usage, cost should be under $5/month
 
 ### Firebase Hosting
+
 - **Free**: 10GB storage, 10GB/month transfer
 - **Overage**: $0.026/GB storage, $0.15/GB transfer
 
 ## Troubleshooting
 
 ### Function Deployment Issues
+
 1. Ensure Blaze plan is enabled
 2. Check `functions/package.json` dependencies
 3. Run `firebase functions:log` for errors
 
 ### CORS Issues
+
 - Functions already configured with CORS
 - If issues persist, check browser dev tools
 
 ### Build Issues
+
 ```bash
 # Clean and rebuild
 cd functions && rm -rf node_modules lib && npm install && npm run build
