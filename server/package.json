@@ -1,0 +1,23 @@
+{
+  "name": "support-alert-server",
+  "version": "1.0.0",
+  "description": "Node.js server for support alert system",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "morgan": "^1.10.0"
+  },
+  "keywords": [
+    "express",
+    "api",
+    "support"
+  ],
+  "author": "",
+  "license": "MIT"
+}

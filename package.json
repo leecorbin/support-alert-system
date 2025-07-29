@@ -1,0 +1,26 @@
+{
+  "name": "support-alert-system",
+  "version": "1.0.0",
+  "description": "A support alert system with Node.js server and React dashboard",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm start",
+    "install-all": "npm install && cd server && npm install && cd ../client && npm install",
+    "build": "cd client && npm run build",
+    "start": "cd server && npm start",
+    "test-hubspot": "node test-hubspot.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "axios": "^1.5.0"
+  },
+  "keywords": [
+    "support",
+    "alert",
+    "dashboard",
+    "hubspot"
+  ],
+  "author": "",
+  "license": "MIT"
+}
