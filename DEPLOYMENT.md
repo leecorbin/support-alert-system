@@ -39,6 +39,7 @@ docker-compose logs -f
 ### 4. Configure HubSpot Webhook
 
 Set your HubSpot webhook URL to:
+
 ```
 http://your-vps-ip:5001/api/support
 ```
@@ -97,6 +98,7 @@ For production, set up SSL using nginx or Caddy as a reverse proxy:
 ### With Caddy (Recommended)
 
 Create a `Caddyfile`:
+
 ```
 your-domain.com {
     reverse_proxy localhost:5001
@@ -109,7 +111,7 @@ your-domain.com {
 server {
     listen 80;
     server_name your-domain.com;
-    
+
     location / {
         proxy_pass http://localhost:5001;
         proxy_set_header Host $host;
