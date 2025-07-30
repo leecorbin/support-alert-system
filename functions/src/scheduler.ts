@@ -56,6 +56,17 @@ const CONFIG = {
   // "1" = New, "2" = Waiting on contact, "3" = Waiting on us
   // Excludes "4" = Closed
   OPEN_TICKET_STAGES: ["1", "2", "3"],
+
+  // Known bot/AI agent IDs in HubSpot
+  // Add your actual bot IDs here - these are the IDs that conversations
+  // start with before being escalated to humans
+  BOT_AGENT_IDS: [
+    // TODO: Add your actual bot agent IDs here
+    // Examples (replace with real IDs):
+    // "bot-12345",
+    // "chatbot-ai",
+    // "automated-agent-001"
+  ] as string[],
 };
 
 /**
@@ -377,6 +388,139 @@ export const getWebhookActivity = onRequest(
   }
 );
 
+// HTTP function to get escalation debug info
+export const getEscalationDebugInfo = onRequest(
+  { cors: true },
+  async (req, res) => {
+    try {
+      // Get recent conversation assignments for debugging
+      const recentConversations = await db
+        .collection("conversations")
+        .orderBy("lastUpdated", "desc")
+        .limit(20)
+        .get();
+
+      const conversations = recentConversations.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      // Get configuration info
+      const config = {
+        botAgentIds: CONFIG.BOT_AGENT_IDS,
+        botAgentIdsConfigured: CONFIG.BOT_AGENT_IDS.length > 0,
+      };
+
+      res.json({
+        success: true,
+        config,
+        recentConversations: conversations,
+        message: "Escalation debug info retrieved successfully",
+      });
+    } catch (error) {
+      logger.error("Error retrieving escalation debug info:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error retrieving escalation debug info",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+);
+
+// HTTP function to get stored webhook payloads for debugging
+export const getWebhookPayloads = onRequest(
+  { cors: true },
+  async (req, res) => {
+    try {
+      // Get recent webhook payloads
+      const limit = parseInt(req.query.limit as string) || 20;
+      const recentPayloads = await db
+        .collection("webhook-payloads")
+        .orderBy("timestamp", "desc")
+        .limit(Math.min(limit, 100)) // Cap at 100 to avoid large responses
+        .get();
+
+      const payloads = recentPayloads.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      res.json({
+        success: true,
+        payloads,
+        count: payloads.length,
+        message: "Webhook payloads retrieved successfully",
+      });
+    } catch (error) {
+      logger.error("Error retrieving webhook payloads:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error retrieving webhook payloads",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+);
+
+// HTTP function to recalculate escalation counts from conversation data
+export const recalculateEscalations = onRequest(
+  { cors: true },
+  async (req, res) => {
+    try {
+      // Count currently active escalations (escalated and counted)
+      const activeEscalations = await db
+        .collection("conversations")
+        .where("escalated", "==", true)
+        .where("escalationCounted", "==", true)
+        .get();
+
+      const escalationCount = activeEscalations.size;
+
+      // Update the support data with the recalculated count
+      const doc = await db.collection("support").doc("current").get();
+
+      if (doc.exists) {
+        const currentData = doc.data() as SupportData;
+        const updatedData: SupportData = {
+          ...currentData,
+          sessions: {
+            ...currentData.sessions,
+            escalated: escalationCount,
+          },
+          lastUpdated: new Date().toISOString(),
+          source: "recalculated",
+        };
+
+        await db.collection("support").doc("current").set(updatedData);
+
+        res.json({
+          success: true,
+          message: "Escalation count recalculated successfully",
+          previousCount: currentData.sessions.escalated,
+          newCount: escalationCount,
+          activeEscalations: activeEscalations.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          })),
+        });
+      } else {
+        res.status(404).json({
+          success: false,
+          message: "No support data found to update",
+        });
+      }
+    } catch (error) {
+      logger.error("Error recalculating escalations:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error recalculating escalations",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+);
+
 // HTTP function to handle HubSpot webhook events
 export const hubspotWebhook = onRequest(
   {
@@ -397,6 +541,9 @@ export const hubspotWebhook = onRequest(
         "HubSpot webhook payload:",
         JSON.stringify(req.body, null, 2)
       );
+
+      // Store the raw payload in Firestore for debugging
+      await storeWebhookPayload(req);
 
       // Respond quickly to HubSpot to acknowledge receipt
       res.status(200).json({
@@ -487,6 +634,79 @@ async function storeWebhookEvent(event: WebhookEvent): Promise<void> {
 }
 
 /**
+ * Store raw webhook payload for debugging (keep last 100)
+ * @param {any} req - Express request object
+ * @return {Promise<void>} Promise that resolves when payload is stored
+ */
+async function storeWebhookPayload(req: any): Promise<void> {
+  // eslint-disable-line
+  try {
+    const payload = {
+      method: req.method,
+      headers: req.headers,
+      body: req.body,
+      query: req.query,
+      timestamp: new Date().toISOString(),
+      userAgent: req.headers["user-agent"] || "",
+      sourceIp: req.ip || "",
+    };
+
+    // Store the payload
+    await db.collection("webhook-payloads").add(payload);
+
+    // Clean up old payloads - keep only the last 100
+    // Run cleanup occasionally to avoid performance impact
+    if (Math.random() < 0.1) {
+      // 10% chance to run cleanup
+      await cleanupOldWebhookPayloads();
+    }
+  } catch (error) {
+    logger.error("Error storing webhook payload:", error);
+  }
+}
+
+/**
+ * Clean up old webhook payloads, keeping only the last 100
+ * @return {Promise<void>} Promise that resolves when cleanup is complete
+ */
+async function cleanupOldWebhookPayloads(): Promise<void> {
+  try {
+    // Get all payloads ordered by timestamp descending
+    const allPayloads = await db
+      .collection("webhook-payloads")
+      .orderBy("timestamp", "desc")
+      .get();
+
+    // If we have more than 100, delete the older ones
+    if (allPayloads.size > 100) {
+      // Keep first 100, delete the rest
+      const payloadsToDelete = allPayloads.docs.slice(100);
+
+      // Delete in batches of 500 (Firestore limit)
+      const batchSize = 500;
+      for (let i = 0; i < payloadsToDelete.length; i += batchSize) {
+        const batch = db.batch();
+        const batchPayloads = payloadsToDelete.slice(i, i + batchSize);
+
+        batchPayloads.forEach((doc) => {
+          batch.delete(doc.ref);
+        });
+
+        await batch.commit();
+      }
+
+      logger.info("Cleaned up old webhook payloads", {
+        totalPayloads: allPayloads.size,
+        deleted: payloadsToDelete.length,
+        remaining: 100,
+      });
+    }
+  } catch (error) {
+    logger.error("Error cleaning up webhook payloads:", error);
+  }
+}
+
+/**
  * Handle ticket-related webhook events
  * @return {Promise<void>} Promise that resolves when event is handled
  */
@@ -532,6 +752,11 @@ async function handleConversationEvent(event: WebhookEvent): Promise<void> {
         conversationId: objectId,
         newStatus: propertyValue,
       });
+
+      // If conversation is being closed, check if we need to decrement
+      if (propertyValue === "CLOSED") {
+        await handleConversationClosure(objectId);
+      }
     }
 
     // Track assignment changes (AI to human escalation)
@@ -541,18 +766,8 @@ async function handleConversationEvent(event: WebhookEvent): Promise<void> {
         assignedTo: propertyValue,
       });
 
-      // Check if this is an escalation from AI to human
-      // Human agent IDs typically start with letters (A-, L-, etc.)
-      // while bots might have different patterns
-      if (
-        propertyValue &&
-        typeof propertyValue === "string" &&
-        (propertyValue.startsWith("A-") ||
-          propertyValue.startsWith("L-") ||
-          propertyValue.startsWith("B-"))
-      ) {
-        await incrementEscalatedSessions();
-      }
+      // Check if this is an escalation away from a known bot
+      await checkForBotEscalation(event);
     }
 
     // For conversation events, trigger a full data refresh for counts
@@ -571,7 +786,156 @@ async function handleConversationEvent(event: WebhookEvent): Promise<void> {
 }
 
 /**
+ * Check if a conversation assignment represents an escalation from bot to human
+ * @param {WebhookEvent} event - Webhook event containing assignment change
+ * @return {Promise<void>} Promise that resolves when check is complete
+ */
+async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
+  try {
+    const { objectId, propertyValue } = event;
+
+    // If no BOT_AGENT_IDS are configured, log a warning and skip detection
+    if (CONFIG.BOT_AGENT_IDS.length === 0) {
+      logger.warn("No bot agent IDs configured for escalation detection");
+      return;
+    }
+
+    // To detect escalation FROM bot TO human, we need to:
+    // 1. Check if the conversation was previously assigned to a bot
+    // 2. Verify it's now assigned to someone else (human)
+
+    // For now, we'll use a simple approach and track conversations that
+    // were previously assigned to bots in Firestore
+    const conversationRef = db.collection("conversations").doc(objectId);
+    const conversationDoc = await conversationRef.get();
+
+    if (conversationDoc.exists) {
+      const conversationData = conversationDoc.data();
+      const previousAssignee = conversationData?.currentAssignee;
+
+      // Check if previous assignee was a bot and current assignee is not
+      if (
+        previousAssignee &&
+        CONFIG.BOT_AGENT_IDS.includes(previousAssignee) &&
+        propertyValue &&
+        !CONFIG.BOT_AGENT_IDS.includes(propertyValue)
+      ) {
+        logger.info("Bot escalation detected", {
+          conversationId: objectId,
+          fromBot: previousAssignee,
+          toHuman: propertyValue,
+        });
+
+        await incrementEscalatedSessions();
+
+        // Mark this conversation as escalated to avoid double-counting
+        await conversationRef.update({
+          escalated: true,
+          escalatedAt: new Date().toISOString(),
+          escalatedFrom: previousAssignee,
+          escalatedTo: propertyValue,
+          escalationCounted: true, // Currently counting toward escalations
+        });
+      }
+    }
+
+    // Update the current assignee for future escalation detection
+    await conversationRef.set(
+      {
+        currentAssignee: propertyValue,
+        lastUpdated: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (error) {
+    logger.error("Error checking for bot escalation:", error);
+  }
+}
+
+/**
+ * Handle conversation closure and update escalation counts
+ * @param {string} conversationId - ID of the conversation being closed
+ * @return {Promise<void>} Promise that resolves when closure is handled
+ */
+async function handleConversationClosure(
+  conversationId: string
+): Promise<void> {
+  try {
+    const conversationRef = db.collection("conversations").doc(conversationId);
+    const conversationDoc = await conversationRef.get();
+
+    if (conversationDoc.exists) {
+      const conversationData = conversationDoc.data();
+
+      // Check if this conversation was previously escalated
+      if (conversationData?.escalated === true) {
+        logger.info("Closed conversation was escalated, decrementing count", {
+          conversationId,
+          escalatedFrom: conversationData.escalatedFrom,
+          escalatedTo: conversationData.escalatedTo,
+        });
+
+        await decrementEscalatedSessions();
+
+        // Mark conversation as closed and no longer counting
+        await conversationRef.update({
+          status: "CLOSED",
+          closedAt: new Date().toISOString(),
+          escalationCounted: false, // No longer counting toward escalations
+        });
+      } else {
+        // Just mark as closed even if it wasn't escalated
+        await conversationRef.update({
+          status: "CLOSED",
+          closedAt: new Date().toISOString(),
+        });
+      }
+    }
+  } catch (error) {
+    logger.error("Error handling conversation closure:", error);
+  }
+}
+
+/**
+ * Decrement escalated sessions counter
+ * @return {Promise<void>} Promise that resolves when counter is updated
+ */
+async function decrementEscalatedSessions(): Promise<void> {
+  try {
+    // Get current data
+    const doc = await db.collection("support").doc("current").get();
+
+    if (doc.exists) {
+      const currentData = doc.data() as SupportData;
+
+      // Decrement escalated sessions (don't go below 0)
+      const newCount = Math.max(0, currentData.sessions.escalated - 1);
+
+      const updatedData: SupportData = {
+        ...currentData,
+        sessions: {
+          ...currentData.sessions,
+          escalated: newCount,
+        },
+        lastUpdated: new Date().toISOString(),
+        source: "webhook-closure",
+      };
+
+      await db.collection("support").doc("current").set(updatedData);
+      logger.info("Escalated sessions decremented", {
+        previousCount: currentData.sessions.escalated,
+        newCount: updatedData.sessions.escalated,
+        conversationClosed: true,
+      });
+    }
+  } catch (error) {
+    logger.error("Error decrementing escalated sessions:", error);
+  }
+}
+
+/**
  * Increment escalated sessions counter
+ * @return {Promise<void>} Promise that resolves when counter is updated
  */
 async function incrementEscalatedSessions(): Promise<void> {
   try {
