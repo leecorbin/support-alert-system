@@ -2,6 +2,13 @@ import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import * as cors from "cors";
 
+// Export scheduled functions
+export {
+  collectSupportData,
+  triggerSupportDataCollection,
+  getCurrentSupportData,
+} from "./scheduler";
+
 // Enable CORS for all requests
 const corsHandler = cors.default({ origin: true });
 

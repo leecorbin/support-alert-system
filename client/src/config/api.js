@@ -28,6 +28,8 @@ const getBaseUrl = () => {
 };
 
 export const API_ENDPOINTS = {
-  SUPPORT: `${getBaseUrl()}/support`,
+  BASE_URL: getBaseUrl(),
+  SUPPORT: `${getBaseUrl()}/getCurrentSupportData`, // Updated to use Firestore endpoint
   HEALTH: `${getBaseUrl()}/health`,
+  TRIGGER_COLLECTION: `${getBaseUrl()}/triggerSupportDataCollection`,
 };

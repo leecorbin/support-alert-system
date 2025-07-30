@@ -12,10 +12,15 @@ const App = () => {
   const fetchSupportData = async () => {
     try {
       setError(null);
-      // Use Firebase Functions endpoint
+      // Use new Firestore-based endpoint
       const response = await axios.get(API_ENDPOINTS.SUPPORT);
-      setSupportData(response.data);
-      setIsOnline(true);
+
+      if (response.data.success) {
+        setSupportData(response.data.data);
+        setIsOnline(true);
+      } else {
+        throw new Error(response.data.message || "Failed to fetch data");
+      }
     } catch (err) {
       console.error("Error fetching support data:", err);
       setError(
@@ -30,8 +35,8 @@ const App = () => {
   useEffect(() => {
     fetchSupportData();
 
-    // Poll for updates every 30 seconds
-    const interval = setInterval(fetchSupportData, 30000);
+    // Poll for updates every 15 seconds (since data is cached in Firestore)
+    const interval = setInterval(fetchSupportData, 15000);
 
     return () => clearInterval(interval);
   }, []);
@@ -44,16 +49,9 @@ const App = () => {
 
   const getTotalTickets = () => {
     if (!supportData?.tickets) return 0;
-    return (
-      supportData.tickets.open +
-      supportData.tickets.chat +
-      supportData.tickets.email
-    );
-  };
-
-  const getTotalSessions = () => {
-    if (!supportData?.sessions) return 0;
-    return supportData.sessions.live + supportData.sessions.human;
+    // The 'open' field already contains the total count of open tickets
+    // 'chat' and 'email' are breakdowns of the open tickets by source type
+    return supportData.tickets.open;
   };
 
   if (loading) {
@@ -90,14 +88,8 @@ const App = () => {
               <div className="metric-card">
                 <h3>
                   <Headphones size={24} />
-                  Support Tickets
+                  Open Tickets
                 </h3>
-                <div className="metric-item">
-                  <span className="metric-label">Open Tickets</span>
-                  <span className="metric-value">
-                    {supportData.tickets.open}
-                  </span>
-                </div>
                 <div className="metric-item">
                   <span className="metric-label">
                     <MessageCircle
@@ -137,12 +129,12 @@ const App = () => {
               <div className="metric-card">
                 <h3>
                   <Users size={24} />
-                  Support Sessions
+                  Chat Sessions
                 </h3>
                 <div className="metric-item">
-                  <span className="metric-label">Live Sessions</span>
+                  <span className="metric-label">Active Sessions</span>
                   <span className="metric-value">
-                    {supportData.sessions.live}
+                    {supportData.sessions.active}
                   </span>
                 </div>
                 <div className="metric-item">
@@ -151,21 +143,11 @@ const App = () => {
                       size={16}
                       style={{ display: "inline", marginRight: "5px" }}
                     />
-                    Human Agents
+                    Escalated to Human
                   </span>
                   <span className="metric-value">
-                    {supportData.sessions.human}
+                    {supportData.sessions.escalated}
                   </span>
-                </div>
-                <div
-                  className="metric-item"
-                  style={{
-                    background: "rgba(255, 255, 255, 0.2)",
-                    fontWeight: "bold",
-                  }}
-                >
-                  <span className="metric-label">Total Sessions</span>
-                  <span className="metric-value">{getTotalSessions()}</span>
                 </div>
               </div>
             </div>

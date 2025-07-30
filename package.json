@@ -16,7 +16,9 @@
     "deploy:hosting": "npm run build:client && npx firebase deploy --only hosting",
     "deploy:functions": "npm run build:functions && npx firebase deploy --only functions",
     "test:firebase": "node test-firebase-functions.js",
-    "emulator": "npx firebase emulators:start"
+    "emulator": "npx firebase emulators:start",
+    "workflow": "node support-workflow.js",
+    "workflow:once": "node -e \"require('./support-workflow').runWorkflow()\""
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
