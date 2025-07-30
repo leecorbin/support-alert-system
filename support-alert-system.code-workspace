@@ -1,0 +1,28 @@
+{
+  "folders": [
+    {
+      "name": "Root",
+      "path": "."
+    },
+    {
+      "name": "Functions",
+      "path": "./functions"
+    },
+    {
+      "name": "Client",
+      "path": "./client"
+    }
+  ],
+  "settings": {
+    "typescript.preferences.includePackageJsonAutoImports": "auto",
+    "typescript.tsc.autoDetect": "on",
+    "eslint.workingDirectories": ["functions", "client"]
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-vscode.vscode-typescript-next",
+      "dbaeumer.vscode-eslint",
+      "esbenp.prettier-vscode"
+    ]
+  }
+}
