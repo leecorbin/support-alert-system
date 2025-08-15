@@ -4,5 +4,8 @@ export declare const getCurrentSupportData: import("firebase-functions/v2/https"
 export declare const getWebhookActivity: import("firebase-functions/v2/https").HttpsFunction;
 export declare const getEscalationDebugInfo: import("firebase-functions/v2/https").HttpsFunction;
 export declare const getWebhookPayloads: import("firebase-functions/v2/https").HttpsFunction;
+export declare const resetEscalations: import("firebase-functions/v2/https").HttpsFunction;
 export declare const recalculateEscalations: import("firebase-functions/v2/https").HttpsFunction;
+export declare const debugConversationEscalation: import("firebase-functions/v2/https").HttpsFunction;
+export declare const manualEscalationProcess: import("firebase-functions/v2/https").HttpsFunction;
 export declare const hubspotWebhook: import("firebase-functions/v2/https").HttpsFunction;
