@@ -29,5 +29,9 @@ module.exports = {
     "import/no-unresolved": 0,
     indent: ["error", 2],
     "object-curly-spacing": ["error", "always"],
+    "operator-linebreak": "off", // Disable strict ternary operator placement
+    "max-len": ["error", { code: 120 }], // Increase line length limit
+    "comma-dangle": "off", // Allow flexible trailing comma usage
+    "require-jsdoc": "off", // Disable JSDoc requirement globally
   },
 };

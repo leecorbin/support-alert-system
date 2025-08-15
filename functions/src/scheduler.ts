@@ -61,8 +61,8 @@ const CONFIG = {
   // Add your actual bot IDs here - these are the IDs that conversations
   // start with before being escalated to humans
   BOT_AGENT_IDS: [
-    // TODO: Add your actual bot agent IDs here
-    // Examples (replace with real IDs):
+    "L-67300874", // Discovered from webhook analysis - HubSpot bot/AI agent
+    // Add additional bot IDs here as discovered:
     // "bot-12345",
     // "chatbot-ai",
     // "automated-agent-001"
@@ -463,6 +463,48 @@ export const getWebhookPayloads = onRequest(
   }
 );
 
+// HTTP function to reset escalation counts to zero
+export const resetEscalations = onRequest({ cors: true }, async (req, res) => {
+  try {
+    // Get current data
+    const doc = await db.collection("support").doc("current").get();
+
+    if (doc.exists) {
+      const currentData = doc.data() as SupportData;
+      const updatedData: SupportData = {
+        ...currentData,
+        sessions: {
+          ...currentData.sessions,
+          escalated: 0,
+        },
+        lastUpdated: new Date().toISOString(),
+        source: "manual-reset",
+      };
+
+      await db.collection("support").doc("current").set(updatedData);
+
+      res.json({
+        success: true,
+        message: "Escalation count reset to zero",
+        previousCount: currentData.sessions.escalated,
+        newCount: 0,
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: "No support data found to reset",
+      });
+    }
+  } catch (error) {
+    logger.error("Error resetting escalations:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error resetting escalations",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
 // HTTP function to recalculate escalation counts from conversation data
 export const recalculateEscalations = onRequest(
   { cors: true },
@@ -515,6 +557,165 @@ export const recalculateEscalations = onRequest(
       res.status(500).json({
         success: false,
         message: "Error recalculating escalations",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+);
+
+// HTTP function to debug specific conversation escalation - v1.1
+export const debugConversationEscalation = onRequest(
+  { cors: true },
+  async (req, res) => {
+    try {
+      const conversationId = req.query.conversationId as string;
+      if (!conversationId) {
+        res.status(400).json({
+          success: false,
+          message: "conversationId query parameter required",
+        });
+        return;
+      }
+
+      // Get conversation data
+      const conversationRef = db
+        .collection("conversations")
+        .doc(conversationId);
+      const conversationDoc = await conversationRef.get();
+
+      // Get webhook events for this conversation
+      const webhookEvents = await db
+        .collection("webhook-events")
+        .where("objectId", "==", conversationId)
+        .where("propertyName", "==", "assignedTo")
+        .orderBy("timestamp", "asc")
+        .get();
+
+      const events = webhookEvents.docs.map((doc) => doc.data());
+
+      // Check for bot assignments
+      const botAssignments = events.filter((event) =>
+        CONFIG.BOT_AGENT_IDS.includes(event.propertyValue || "")
+      );
+
+      // Check for human assignments
+      const humanAssignments = events.filter(
+        (event) =>
+          event.propertyValue &&
+          !CONFIG.BOT_AGENT_IDS.includes(event.propertyValue)
+      );
+
+      res.json({
+        success: true,
+        conversationId,
+        conversationExists: conversationDoc.exists,
+        conversationData: conversationDoc.exists
+          ? conversationDoc.data()
+          : null,
+        webhookEvents: events,
+        botAssignments,
+        humanAssignments,
+        shouldBeEscalation:
+          botAssignments.length > 0 && humanAssignments.length > 0,
+        config: {
+          botAgentIds: CONFIG.BOT_AGENT_IDS,
+        },
+      });
+    } catch (error) {
+      logger.error("Error debugging conversation escalation:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error debugging conversation escalation",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+);
+
+// HTTP function to manually process escalation for a specific conversation
+export const manualEscalationProcess = onRequest(
+  { cors: true },
+  async (req, res) => {
+    try {
+      const conversationId = req.query.conversationId as string;
+      if (!conversationId) {
+        res.status(400).json({
+          success: false,
+          message: "conversationId query parameter required",
+        });
+        return;
+      }
+
+      logger.info("🔧 MANUAL ESCALATION PROCESSING STARTED", {
+        conversationId,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Get webhook events for this conversation
+      const webhookEvents = await db
+        .collection("webhook-events")
+        .where("objectId", "==", conversationId)
+        .where("propertyName", "==", "assignedTo")
+        .orderBy("timestamp", "asc")
+        .get();
+
+      const events = webhookEvents.docs.map((doc) => doc.data());
+
+      logger.info("📋 Retrieved webhook events", {
+        conversationId,
+        eventCount: events.length,
+        events: events.map((e) => ({
+          timestamp: e.timestamp,
+          propertyValue: e.propertyValue,
+          isBot: CONFIG.BOT_AGENT_IDS.includes(e.propertyValue || ""),
+        })),
+      });
+
+      // Process each assignment event in order
+      for (const event of events) {
+        logger.info("🔄 Processing assignment event", {
+          conversationId,
+          assignee: event.propertyValue,
+          timestamp: event.timestamp,
+        });
+
+        // Simulate the webhook event processing
+        const webhookEvent: WebhookEvent = {
+          subscriptionType: "conversation.propertyChange",
+          propertyName: "assignedTo",
+          propertyValue: event.propertyValue,
+          objectId: conversationId,
+          changeFlag: "PROPERTY_CHANGE",
+        };
+
+        await checkForBotEscalation(webhookEvent);
+      }
+
+      // Check final state
+      const conversationDoc = await db
+        .collection("conversations")
+        .doc(conversationId)
+        .get();
+
+      const finalData = await db.collection("support").doc("current").get();
+
+      res.json({
+        success: true,
+        message: "Manual escalation processing completed",
+        conversationId,
+        eventsProcessed: events.length,
+        finalConversationData: conversationDoc.exists
+          ? conversationDoc.data()
+          : null,
+        finalEscalationCount: finalData.exists
+          ? (finalData.data() as SupportData).sessions.escalated
+          : null,
+      });
+    } catch (error) {
+      logger.error("❌ Manual escalation processing failed:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error in manual escalation processing",
         error: error instanceof Error ? error.message : "Unknown error",
       });
     }
@@ -638,8 +839,8 @@ async function storeWebhookEvent(event: WebhookEvent): Promise<void> {
  * @param {any} req - Express request object
  * @return {Promise<void>} Promise that resolves when payload is stored
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any, require-jsdoc
 async function storeWebhookPayload(req: any): Promise<void> {
-  // eslint-disable-line
   try {
     const payload = {
       method: req.method,
@@ -791,8 +992,14 @@ async function handleConversationEvent(event: WebhookEvent): Promise<void> {
  * @return {Promise<void>} Promise that resolves when check is complete
  */
 async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
+  const { objectId, propertyValue } = event;
+
   try {
-    const { objectId, propertyValue } = event;
+    logger.info("=== ESCALATION CHECK START ===", {
+      conversationId: objectId,
+      assignedTo: propertyValue,
+      timestamp: new Date().toISOString(),
+    });
 
     // If no BOT_AGENT_IDS are configured, log a warning and skip detection
     if (CONFIG.BOT_AGENT_IDS.length === 0) {
@@ -800,55 +1007,290 @@ async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
       return;
     }
 
-    // To detect escalation FROM bot TO human, we need to:
-    // 1. Check if the conversation was previously assigned to a bot
-    // 2. Verify it's now assigned to someone else (human)
+    logger.info("Checking assignment change for escalation", {
+      conversationId: objectId,
+      newAssignee: propertyValue,
+      isBot: CONFIG.BOT_AGENT_IDS.includes(propertyValue || ""),
+      configuredBots: CONFIG.BOT_AGENT_IDS,
+    });
 
-    // For now, we'll use a simple approach and track conversations that
-    // were previously assigned to bots in Firestore
     const conversationRef = db.collection("conversations").doc(objectId);
-    const conversationDoc = await conversationRef.get();
 
-    if (conversationDoc.exists) {
-      const conversationData = conversationDoc.data();
-      const previousAssignee = conversationData?.currentAssignee;
+    // Handle bot assignment - just track it
+    if (propertyValue && CONFIG.BOT_AGENT_IDS.includes(propertyValue)) {
+      logger.info("🤖 BOT ASSIGNMENT DETECTED", {
+        conversationId: objectId,
+        botId: propertyValue,
+      });
 
-      // Check if previous assignee was a bot and current assignee is not
-      if (
-        previousAssignee &&
-        CONFIG.BOT_AGENT_IDS.includes(previousAssignee) &&
-        propertyValue &&
-        !CONFIG.BOT_AGENT_IDS.includes(propertyValue)
-      ) {
-        logger.info("Bot escalation detected", {
+      try {
+        await conversationRef.set(
+          {
+            currentAssignee: propertyValue,
+            lastUpdated: new Date().toISOString(),
+            hasBotAssignment: true, // Track that this conversation had a bot
+          },
+          { merge: true }
+        );
+        logger.info("✅ Bot assignment stored successfully", {
           conversationId: objectId,
-          fromBot: previousAssignee,
+          botId: propertyValue,
+        });
+      } catch (firestoreError) {
+        logger.error("❌ Failed to store bot assignment", {
+          conversationId: objectId,
+          botId: propertyValue,
+          error: firestoreError,
+        });
+        throw firestoreError;
+      }
+      return;
+    }
+
+    // Handle human assignment - check if it's an escalation
+    if (propertyValue && !CONFIG.BOT_AGENT_IDS.includes(propertyValue)) {
+      logger.info("👤 HUMAN ASSIGNMENT DETECTED", {
+        conversationId: objectId,
+        humanAgent: propertyValue,
+      });
+
+      // Get current conversation state
+      let conversationDoc;
+      try {
+        conversationDoc = await conversationRef.get();
+        logger.info("📄 Conversation document retrieved", {
+          conversationId: objectId,
+          exists: conversationDoc.exists,
+          data: conversationDoc.exists ? conversationDoc.data() : null,
+        });
+      } catch (firestoreError) {
+        logger.error("❌ Failed to retrieve conversation document", {
+          conversationId: objectId,
+          error: firestoreError,
+        });
+        throw firestoreError;
+      }
+
+      let isEscalation = false;
+      let escalatedFrom = "";
+
+      if (conversationDoc.exists) {
+        const conversationData = conversationDoc.data();
+        const previousAssignee = conversationData?.currentAssignee;
+        const hasBotAssignment = conversationData?.hasBotAssignment || false;
+
+        logger.info("🔍 Analyzing existing conversation", {
+          conversationId: objectId,
+          previousAssignee,
+          hasBotAssignment,
+          allData: conversationData,
+        });
+
+        // Escalation detected if:
+        // 1. Previous assignee was a bot, OR
+        // 2. Conversation previously had a bot assignment (race condition)
+        if (
+          (previousAssignee &&
+            CONFIG.BOT_AGENT_IDS.includes(previousAssignee)) ||
+          hasBotAssignment
+        ) {
+          isEscalation = true;
+          escalatedFrom = previousAssignee || "unknown-bot";
+          logger.info("✅ ESCALATION FROM EXISTING DATA", {
+            conversationId: objectId,
+            previousAssignee,
+            hasBotAssignment,
+            escalatedFrom,
+          });
+        } else {
+          logger.info("❌ No escalation from existing data", {
+            conversationId: objectId,
+            previousAssignee,
+            hasBotAssignment,
+            reason: "No bot assignment found in conversation data",
+          });
+        }
+      } else {
+        logger.info("📝 New conversation - checking webhook history", {
+          conversationId: objectId,
+        });
+
+        // New conversation - check recent webhook events for bot assignment
+        // This handles race condition where human assignment comes first
+        try {
+          const recentBotAssignment = await checkRecentBotAssignment(objectId);
+          if (recentBotAssignment) {
+            isEscalation = true;
+            escalatedFrom = recentBotAssignment;
+            logger.info("✅ ESCALATION FROM WEBHOOK HISTORY", {
+              conversationId: objectId,
+              botFoundInHistory: recentBotAssignment,
+            });
+          } else {
+            logger.info("❌ No bot assignment found in webhook history", {
+              conversationId: objectId,
+            });
+          }
+        } catch (webhookError) {
+          logger.error("❌ Failed to check webhook history", {
+            conversationId: objectId,
+            error: webhookError,
+          });
+          throw webhookError;
+        }
+      }
+
+      if (isEscalation) {
+        logger.info("🚨 ESCALATION CONFIRMED - PROCESSING", {
+          conversationId: objectId,
+          fromBot: escalatedFrom,
           toHuman: propertyValue,
         });
 
-        await incrementEscalatedSessions();
+        try {
+          await incrementEscalatedSessions();
+          logger.info("✅ Escalation count incremented successfully");
+        } catch (incrementError) {
+          logger.error("❌ Failed to increment escalation count", {
+            error: incrementError,
+          });
+          throw incrementError;
+        }
 
         // Mark this conversation as escalated to avoid double-counting
-        await conversationRef.update({
-          escalated: true,
-          escalatedAt: new Date().toISOString(),
-          escalatedFrom: previousAssignee,
-          escalatedTo: propertyValue,
-          escalationCounted: true, // Currently counting toward escalations
+        try {
+          await conversationRef.set(
+            {
+              currentAssignee: propertyValue,
+              lastUpdated: new Date().toISOString(),
+              escalated: true,
+              escalatedAt: new Date().toISOString(),
+              escalatedFrom: escalatedFrom,
+              escalatedTo: propertyValue,
+              escalationCounted: true, // Currently counting toward escalations
+              hasBotAssignment: true,
+            },
+            { merge: true }
+          );
+          logger.info("✅ Escalation data stored successfully", {
+            conversationId: objectId,
+            escalatedFrom,
+            escalatedTo: propertyValue,
+          });
+        } catch (escalationStoreError) {
+          logger.error("❌ Failed to store escalation data", {
+            conversationId: objectId,
+            error: escalationStoreError,
+          });
+          throw escalationStoreError;
+        }
+      } else {
+        logger.info("📝 No escalation - storing human assignment", {
+          conversationId: objectId,
+          humanAgent: propertyValue,
         });
+
+        // Just update the current assignee
+        try {
+          await conversationRef.set(
+            {
+              currentAssignee: propertyValue,
+              lastUpdated: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+          logger.info("✅ Human assignment stored successfully", {
+            conversationId: objectId,
+            assignee: propertyValue,
+          });
+        } catch (assignmentStoreError) {
+          logger.error("❌ Failed to store human assignment", {
+            conversationId: objectId,
+            error: assignmentStoreError,
+          });
+          throw assignmentStoreError;
+        }
       }
     }
 
-    // Update the current assignee for future escalation detection
-    await conversationRef.set(
-      {
-        currentAssignee: propertyValue,
-        lastUpdated: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    logger.info("=== ESCALATION CHECK COMPLETE ===", {
+      conversationId: objectId,
+      success: true,
+    });
   } catch (error) {
-    logger.error("Error checking for bot escalation:", error);
+    logger.error("❌ ESCALATION CHECK FAILED", {
+      conversationId: objectId,
+      assignedTo: propertyValue,
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    // Don't throw the error to prevent webhook processing from failing
+    // Just log it for debugging
+  }
+}
+
+/**
+ * Check recent webhook events for bot assignment to handle race conditions
+ * @param {string} conversationId - Conversation ID to check
+ * @return {Promise<string|null>} Bot ID if found, null otherwise
+ */
+async function checkRecentBotAssignment(
+  conversationId: string
+): Promise<string | null> {
+  try {
+    logger.info("🔍 Checking webhook history for bot assignment", {
+      conversationId,
+    });
+
+    // Look for recent bot assignment events for this conversation
+    const recentEvents = await db
+      .collection("webhook-events")
+      .where("objectId", "==", conversationId)
+      .where("propertyName", "==", "assignedTo")
+      .orderBy("timestamp", "desc")
+      .limit(10)
+      .get();
+
+    logger.info("📊 Webhook events found", {
+      conversationId,
+      eventCount: recentEvents.docs.length,
+    });
+
+    for (const doc of recentEvents.docs) {
+      const event = doc.data();
+      logger.info("🔎 Examining webhook event", {
+        conversationId,
+        eventPropertyValue: event.propertyValue,
+        eventTimestamp: event.timestamp,
+        isBot: CONFIG.BOT_AGENT_IDS.includes(event.propertyValue || ""),
+      });
+
+      if (
+        event.propertyValue &&
+        CONFIG.BOT_AGENT_IDS.includes(event.propertyValue)
+      ) {
+        logger.info("✅ Found recent bot assignment in webhook events", {
+          conversationId,
+          botId: event.propertyValue,
+          timestamp: event.timestamp,
+        });
+        return event.propertyValue;
+      }
+    }
+
+    logger.info("❌ No bot assignment found in webhook history", {
+      conversationId,
+      eventsChecked: recentEvents.docs.length,
+    });
+
+    return null;
+  } catch (error) {
+    logger.error("❌ Error checking recent bot assignment", {
+      conversationId,
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return null;
   }
 }
 
@@ -939,11 +1381,18 @@ async function decrementEscalatedSessions(): Promise<void> {
  */
 async function incrementEscalatedSessions(): Promise<void> {
   try {
+    logger.info("📈 Incrementing escalated sessions count");
+
     // Get current data
     const doc = await db.collection("support").doc("current").get();
 
     if (doc.exists) {
       const currentData = doc.data() as SupportData;
+      const previousCount = currentData.sessions.escalated;
+
+      logger.info("📊 Current escalation count", {
+        previousCount,
+      });
 
       // Increment escalated sessions
       const updatedData: SupportData = {
@@ -957,12 +1406,22 @@ async function incrementEscalatedSessions(): Promise<void> {
       };
 
       await db.collection("support").doc("current").set(updatedData);
-      logger.info("Escalated sessions incremented", {
+
+      logger.info("✅ Escalated sessions incremented successfully", {
         previousCount: currentData.sessions.escalated,
         newCount: updatedData.sessions.escalated,
       });
+    } else {
+      logger.warn(
+        "⚠️ No support data document found for incrementing escalations"
+      );
+      throw new Error("Support data document not found");
     }
   } catch (error) {
-    logger.error("Error incrementing escalated sessions:", error);
+    logger.error("❌ Error incrementing escalated sessions", {
+      error: error instanceof Error ? error.message : error,
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    throw error;
   }
 }

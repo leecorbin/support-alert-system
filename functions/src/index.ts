@@ -11,6 +11,9 @@ export {
   getEscalationDebugInfo,
   getWebhookPayloads,
   recalculateEscalations,
+  resetEscalations,
+  debugConversationEscalation,
+  manualEscalationProcess,
 } from "./scheduler";
 
 // Enable CORS for all requests
@@ -23,7 +26,7 @@ export const health = onRequest((request, response) => {
       status: "healthy",
       timestamp: new Date().toISOString(),
       function: "support-alert-system",
-      version: "2.0-webhook-driven",
+      version: "2.1-with-escalation-tracking",
     });
   });
 });
