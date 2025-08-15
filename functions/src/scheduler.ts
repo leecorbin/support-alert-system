@@ -19,11 +19,11 @@ interface SupportData {
     open: number;
     chat: number;
     email: number;
-    other: number; // Add other ticket types
+    other: number;
   };
   sessions: {
-    active: number; // Currently active chat sessions
-    escalated: number; // Sessions escalated from AI to human
+    active: number | null; // null when data unavailable
+    escalated: number | null; // null when data unavailable
   };
   lastUpdated: string;
   source: string;
@@ -141,11 +141,11 @@ async function getHubSpotData(token: string): Promise<SupportData> {
 /**
  * Get active chat sessions from HubSpot Conversations API
  * @param {string} token - HubSpot access token
- * @return {Promise<number>} Number of active chat sessions
+ * @return {Promise<number|null>} Number of active chat sessions or null if unavailable
  */
 async function getActiveChatSessionsFromHubSpot(
   token: string
-): Promise<number> {
+): Promise<number | null> {
   try {
     // Fetch threads from HubSpot Conversations API
     const response = await axios.get(
@@ -165,8 +165,8 @@ async function getActiveChatSessionsFromHubSpot(
     // Filter for active chat threads
     const threads = response.data.results || [];
     logger.info(
-      "HubSpot Conversations API threads:",
-      JSON.stringify(threads, null, 2)
+      "HubSpot Conversations API response sample:",
+      JSON.stringify(threads.slice(0, 3), null, 2)
     );
     // Only count threads that are Live Chat and currently open
     // Live Chat channelId is "1000" (from user-provided mapping)
@@ -177,42 +177,53 @@ async function getActiveChatSessionsFromHubSpot(
     return activeChats.length;
   } catch (error) {
     logger.error("Error fetching active chat sessions from HubSpot:", error);
-    return 0;
+    return null; // Return null to indicate unavailable data
   }
 }
 
 /**
  * Get sessions escalated to human agents (only currently active ones)
  */
-async function getEscalatedSessions(): Promise<number> {
+async function getEscalatedSessions(): Promise<number | null> {
   try {
-    // Only count escalations that are:
-    // 1. Currently escalated (escalated: true)
-    // 2. Being counted (escalationCounted: true)
-    // 3. Updated recently (within last 24 hours) to ensure they're still active
-    const twentyFourHoursAgo = new Date();
-    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+    // Simplified approach: Get current escalated count from stored data
+    // Avoids complex Firestore composite index requirements
+    const doc = await db.collection("support").doc("current").get();
 
-    const activeEscalations = await db
-      .collection("conversations")
-      .where("escalated", "==", true)
-      .where("escalationCounted", "==", true)
-      .where("lastUpdated", ">", twentyFourHoursAgo.toISOString())
-      .get();
+    if (doc.exists) {
+      const currentData = doc.data() as SupportData;
+      const storedCount = currentData.sessions?.escalated;
+      if (typeof storedCount === "number") {
+        return storedCount;
+      }
+    }
 
-    const escalationCount = activeEscalations.size;
+    // If no stored data, try simple query without time filter
+    try {
+      const activeEscalations = await db
+        .collection("conversations")
+        .where("escalated", "==", true)
+        .where("escalationCounted", "==", true)
+        .limit(10) // Small limit to avoid performance issues
+        .get();
 
-    logger.info("Current active escalated sessions", {
-      count: escalationCount,
-      cutoffTime: twentyFourHoursAgo.toISOString(),
-      conversationIds: activeEscalations.docs.map((doc) => doc.id),
-    });
+      const escalationCount = activeEscalations.size;
+      
+      logger.info("Current escalated sessions count", {
+        count: escalationCount,
+        method: "simple-query",
+      });
 
-    return escalationCount;
+      return escalationCount;
+    } catch (indexError) {
+      logger.warn("Escalation query requires index, falling back to stored value", {
+        error: indexError instanceof Error ? indexError.message : indexError,
+      });
+      return null; // Indicate data unavailable
+    }
   } catch (error) {
     logger.error("Error getting escalated sessions count:", error);
-    // Return 0 on error instead of mock data
-    return 0;
+    return null; // Return null to indicate unavailable data
   }
 }
 
@@ -222,28 +233,22 @@ async function getEscalatedSessions(): Promise<number> {
  * @return {SupportData} Mock support data
  */
 function getMockData(source: string): SupportData {
-  const openTickets = Math.floor(Math.random() * 20) + 5;
-  const chatTickets = Math.floor(Math.random() * 10) + 2;
-  const emailTickets = Math.floor(Math.random() * 15) + 3;
-  const otherTickets = Math.max(0, openTickets - chatTickets - emailTickets);
-
+  // Return realistic "no data available" state instead of random numbers
   return {
     tickets: {
-      open: openTickets,
-      chat: chatTickets,
-      email: emailTickets,
-      other: otherTickets,
+      open: 0,
+      chat: 0,
+      email: 0,
+      other: 0,
     },
     sessions: {
-      active: Math.floor(Math.random() * 5) + 1,
-      escalated: Math.floor(Math.random() * 2),
+      active: null, // Indicate unavailable data
+      escalated: null, // Indicate unavailable data
     },
     lastUpdated: new Date().toISOString(),
     source,
   };
-}
-
-/**
+}/**
  * Store data in Firestore
  * @param {SupportData} data - Support data to store
  * @return {Promise<void>} Promise that resolves when data is stored
@@ -1371,7 +1376,8 @@ async function decrementEscalatedSessions(): Promise<void> {
       const currentData = doc.data() as SupportData;
 
       // Decrement escalated sessions (don't go below 0)
-      const newCount = Math.max(0, currentData.sessions.escalated - 1);
+      const currentCount = currentData.sessions.escalated || 0;
+      const newCount = Math.max(0, currentCount - 1);
 
       const updatedData: SupportData = {
         ...currentData,
@@ -1415,11 +1421,12 @@ async function incrementEscalatedSessions(): Promise<void> {
       });
 
       // Increment escalated sessions
+      const currentCount = currentData.sessions.escalated || 0;
       const updatedData: SupportData = {
         ...currentData,
         sessions: {
           ...currentData.sessions,
-          escalated: currentData.sessions.escalated + 1,
+          escalated: currentCount + 1,
         },
         lastUpdated: new Date().toISOString(),
         source: "webhook-escalation",

@@ -114,14 +114,12 @@ const App = () => {
                     {supportData.tickets.email}
                   </span>
                 </div>
-                {supportData.tickets.other > 0 && (
-                  <div className="metric-item">
-                    <span className="metric-label">Other Tickets</span>
-                    <span className="metric-value">
-                      {supportData.tickets.other}
-                    </span>
-                  </div>
-                )}
+                <div className="metric-item">
+                  <span className="metric-label">Other Tickets</span>
+                  <span className="metric-value">
+                    {supportData.tickets.other}
+                  </span>
+                </div>
                 <div
                   className="metric-item"
                   style={{
@@ -142,7 +140,7 @@ const App = () => {
                 <div className="metric-item">
                   <span className="metric-label">Active Sessions</span>
                   <span className="metric-value">
-                    {supportData.sessions.active}
+                    {supportData.sessions.active !== null ? supportData.sessions.active : '⚠️'}
                   </span>
                 </div>
                 <div className="metric-item">
@@ -154,7 +152,7 @@ const App = () => {
                     Escalated to Human
                   </span>
                   <span className="metric-value">
-                    {supportData.sessions.escalated}
+                    {supportData.sessions.escalated !== null ? supportData.sessions.escalated : '⚠️'}
                   </span>
                 </div>
               </div>
