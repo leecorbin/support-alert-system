@@ -114,6 +114,14 @@ const App = () => {
                     {supportData.tickets.email}
                   </span>
                 </div>
+                {supportData.tickets.other > 0 && (
+                  <div className="metric-item">
+                    <span className="metric-label">Other Tickets</span>
+                    <span className="metric-value">
+                      {supportData.tickets.other}
+                    </span>
+                  </div>
+                )}
                 <div
                   className="metric-item"
                   style={{

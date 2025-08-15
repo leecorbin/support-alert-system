@@ -19,6 +19,7 @@ interface SupportData {
     open: number;
     chat: number;
     email: number;
+    other: number; // Add other ticket types
   };
   sessions: {
     active: number; // Currently active chat sessions
@@ -115,12 +116,14 @@ async function getHubSpotData(token: string): Promise<SupportData> {
     const emailTickets = tickets.filter(
       (t: HubSpotTicket) => t.properties.source_type === "EMAIL"
     ).length;
+    const otherTickets = openTickets - chatTickets - emailTickets;
 
     return {
       tickets: {
         open: openTickets,
         chat: chatTickets,
         email: emailTickets,
+        other: otherTickets,
       },
       sessions: {
         active: await getActiveChatSessionsFromHubSpot(token),
@@ -179,26 +182,37 @@ async function getActiveChatSessionsFromHubSpot(
 }
 
 /**
- * Get sessions escalated to human agents
+ * Get sessions escalated to human agents (only currently active ones)
  */
 async function getEscalatedSessions(): Promise<number> {
   try {
-    // Get current escalated count from Firestore
-    const doc = await db.collection("support").doc("current").get();
+    // Only count escalations that are:
+    // 1. Currently escalated (escalated: true)
+    // 2. Being counted (escalationCounted: true)
+    // 3. Updated recently (within last 24 hours) to ensure they're still active
+    const twentyFourHoursAgo = new Date();
+    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
 
-    if (doc.exists) {
-      const currentData = doc.data() as SupportData;
-      return currentData.sessions?.escalated || 0;
-    }
+    const activeEscalations = await db
+      .collection("conversations")
+      .where("escalated", "==", true)
+      .where("escalationCounted", "==", true)
+      .where("lastUpdated", ">", twentyFourHoursAgo.toISOString())
+      .get();
 
-    // If no data exists yet, return 0
-    return 0;
+    const escalationCount = activeEscalations.size;
+
+    logger.info("Current active escalated sessions", {
+      count: escalationCount,
+      cutoffTime: twentyFourHoursAgo.toISOString(),
+      conversationIds: activeEscalations.docs.map((doc) => doc.id),
+    });
+
+    return escalationCount;
   } catch (error) {
     logger.error("Error getting escalated sessions count:", error);
-    // Fallback to business hours simulation if there's an error
-    const businessHours =
-      new Date().getHours() >= 9 && new Date().getHours() <= 17;
-    return businessHours ? Math.floor(Math.random() * 3) : 0;
+    // Return 0 on error instead of mock data
+    return 0;
   }
 }
 
@@ -208,11 +222,17 @@ async function getEscalatedSessions(): Promise<number> {
  * @return {SupportData} Mock support data
  */
 function getMockData(source: string): SupportData {
+  const openTickets = Math.floor(Math.random() * 20) + 5;
+  const chatTickets = Math.floor(Math.random() * 10) + 2;
+  const emailTickets = Math.floor(Math.random() * 15) + 3;
+  const otherTickets = Math.max(0, openTickets - chatTickets - emailTickets);
+
   return {
     tickets: {
-      open: Math.floor(Math.random() * 20) + 5,
-      chat: Math.floor(Math.random() * 10) + 2,
-      email: Math.floor(Math.random() * 15) + 3,
+      open: openTickets,
+      chat: chatTickets,
+      email: emailTickets,
+      other: otherTickets,
     },
     sessions: {
       active: Math.floor(Math.random() * 5) + 1,
