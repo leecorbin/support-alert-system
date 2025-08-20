@@ -1,0 +1,11 @@
+{
+  "name": "support-alert-system",
+  "version": "1.0.0",
+  "description": "Real-time support alert system with Firebase Functions and React dashboard",
+  "scripts": {
+    "deploy": "firebase deploy",
+    "deploy:functions": "firebase deploy --only functions",
+    "deploy:hosting": "firebase deploy --only hosting"
+  },
+  "private": true
+}

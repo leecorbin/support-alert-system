@@ -1,18 +1,19 @@
 // Firebase Functions configuration
-const FIREBASE_PROJECT_ID = "support-alert-system-385b1";
-const FIREBASE_REGION = "us-central1";
+// Note: Update these values for your own Firebase project
+const FIREBASE_PROJECT_ID =
+  process.env.REACT_APP_FIREBASE_PROJECT_ID || "your-firebase-project-id";
+const FIREBASE_REGION = process.env.REACT_APP_FIREBASE_REGION || "us-central1";
 
 // API endpoints configuration
 export const API_CONFIG = {
   // Development mode - use local Firebase emulator or deployed functions
   isDevelopment: process.env.NODE_ENV === "development",
 
-  // Firebase Functions URLs
-  FUNCTIONS_BASE_URL: `https://${FIREBASE_REGION}-${FIREBASE_PROJECT_ID}.cloudfunctions.net`,
+  // Firebase Functions URLs - using the correct v2 format
+  FUNCTIONS_BASE_URL: `https://getcurrentsupportdata-nts4expcga-uc.a.run.app`,
 
   // Local emulator URL (for development)
-  EMULATOR_BASE_URL:
-    "http://localhost:5001/support-alert-system-385b1/us-central1",
+  EMULATOR_BASE_URL: `http://localhost:5001/${FIREBASE_PROJECT_ID}/${FIREBASE_REGION}`,
 };
 
 // Get the appropriate base URL
@@ -29,7 +30,7 @@ const getBaseUrl = () => {
 
 export const API_ENDPOINTS = {
   BASE_URL: getBaseUrl(),
-  SUPPORT: `${getBaseUrl()}/getCurrentSupportData`, // Updated to use Firestore endpoint
+  SUPPORT: API_CONFIG.FUNCTIONS_BASE_URL, // Direct URL to the function
   HEALTH: `${getBaseUrl()}/health`,
   TRIGGER_COLLECTION: `${getBaseUrl()}/triggerSupportDataCollection`,
 };

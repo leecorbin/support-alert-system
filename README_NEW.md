@@ -15,12 +15,14 @@ A comprehensive real-time support monitoring system that detects new conversatio
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Node.js 18+
 - Firebase CLI
 - Firebase project with Firestore and Functions enabled
 - HubSpot account with private app access
 
 ### Installation
+
 ```bash
 # Clone the repository
 git clone <repository-url>
@@ -37,6 +39,7 @@ cp .env.example .env
 ```
 
 ### Configuration
+
 1. **Firebase Project**: Set your project ID in `.env`
 2. **HubSpot Access Token**: Add your private app token
 3. **Bot Agent IDs**: Configure your bot/AI agent IDs
@@ -47,12 +50,14 @@ cp .env.example .env
 ## 🏗️ Architecture
 
 ### Components
+
 - **Firebase Functions**: Webhook processing and escalation detection
-- **React Dashboard**: Real-time monitoring interface  
+- **React Dashboard**: Real-time monitoring interface
 - **Firestore Database**: Conversation and event storage
 - **HubSpot Webhooks**: Real-time conversation event streaming
 
 ### Data Flow
+
 1. HubSpot sends webhook events for conversation assignments
 2. Firebase Functions process events and detect bot-to-human escalations
 3. Events stored in Firestore with proper indexing
@@ -62,12 +67,14 @@ cp .env.example .env
 ## 📊 Dashboard Features
 
 ### Real-Time Metrics
+
 - **Active Conversations**: Live count of ongoing chats
 - **Escalated Sessions**: Conversations escalated to humans
 - **New Chat Alerts**: Immediate notification of new conversations
 - **Response Time Tracking**: Monitor escalation detection speed
 
 ### Visual Indicators
+
 - **Green Gradient**: No active escalations
 - **Orange/Red Gradient**: Active escalations requiring attention
 - **Enhanced Timestamps**: Human-readable time formatting
@@ -76,6 +83,7 @@ cp .env.example .env
 ## 🔧 Configuration
 
 ### Environment Variables
+
 ```bash
 # Firebase Configuration
 REACT_APP_FIREBASE_PROJECT_ID=your-firebase-project
@@ -86,7 +94,9 @@ BOT_AGENT_IDS=L-67300874,other-bot-id
 ```
 
 ### Bot Agent ID Discovery
+
 Your bot agent IDs are unique to your HubSpot account. Find them by:
+
 1. Monitoring webhook events in Firebase logs
 2. Looking for agent IDs when conversations start with bots
 3. Contacting HubSpot support for your specific bot IDs
@@ -94,6 +104,7 @@ Your bot agent IDs are unique to your HubSpot account. Find them by:
 ## 🛠️ Development
 
 ### Local Development
+
 ```bash
 # Start Firebase emulators
 firebase emulators:start
@@ -103,6 +114,7 @@ cd client && npm start
 ```
 
 ### Testing
+
 ```bash
 # Test webhook processing
 curl -X POST https://your-function-url/hubspotWebhook \
@@ -111,6 +123,7 @@ curl -X POST https://your-function-url/hubspotWebhook \
 ```
 
 ### Debug Endpoints
+
 - `/getEscalationDebugInfo` - Configuration and recent activity
 - `/debugConversationEscalation` - Specific conversation analysis
 - `/getWebhookActivity` - Recent webhook events
@@ -119,12 +132,14 @@ curl -X POST https://your-function-url/hubspotWebhook \
 ## 📈 Performance & Costs
 
 ### Optimization
+
 - **10-second polling** for real-time feel with cost efficiency
 - **Composite Firestore indexes** for fast queries
 - **Efficient webhook processing** with minimal function execution time
 - **Strategic data caching** to reduce read operations
 
 ### Expected Costs (Monthly)
+
 - **Firebase Functions**: $1-5 (normal usage)
 - **Firestore**: $1-3 (10-50 conversations/day)
 - **Firebase Hosting**: Free tier sufficient
@@ -133,12 +148,14 @@ curl -X POST https://your-function-url/hubspotWebhook \
 ## 🔒 Security
 
 ### Access Control
+
 - **Firebase Security Rules**: Read-only access from dashboard
 - **Function-only Writes**: All data modifications through Functions
 - **Secrets Management**: HubSpot tokens stored as Firebase secrets
 - **Environment Variables**: No hardcoded sensitive data
 
 ### Best Practices
+
 - Regular token rotation
 - Monitor for unauthorized access
 - Secure webhook endpoints
@@ -147,12 +164,14 @@ curl -X POST https://your-function-url/hubspotWebhook \
 ## 🚨 Troubleshooting
 
 ### Common Issues
+
 1. **Webhook Not Working**: Check HubSpot subscription and function URL
 2. **Bot IDs Not Detected**: Verify bot agent ID configuration
 3. **Dashboard Not Updating**: Check Firestore security rules
 4. **High Costs**: Reduce polling frequency or optimize queries
 
 ### Monitoring
+
 - Firebase Functions logs for webhook processing
 - Firestore usage metrics for cost optimization
 - HubSpot webhook delivery status

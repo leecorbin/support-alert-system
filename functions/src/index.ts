@@ -9,6 +9,8 @@ export {
   hubspotWebhook,
   getWebhookActivity,
   getEscalationDebugInfo,
+  debugSpecificConversations,
+  clearAllConversationData,
   getWebhookPayloads,
   recalculateEscalations,
   resetEscalations,

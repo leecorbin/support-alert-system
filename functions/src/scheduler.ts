@@ -6,8 +6,10 @@ import { getFirestore } from "firebase-admin/firestore";
 import { logger } from "firebase-functions";
 import axios from "axios";
 
-// Define the secret
+// Define the secrets
 const hubspotAccessToken = defineSecret("HUBSPOT_ACCESS_TOKEN");
+const botAgentIds = defineSecret("BOT_AGENT_IDS"); // Comma-separated list of bot agent IDs
+// Note: Notifications will use console logging and Firestore only for now
 
 // Initialize Firebase Admin
 initializeApp();
@@ -38,8 +40,12 @@ interface HubSpotTicket {
 }
 
 interface HubSpotThread {
+  id: string;
   status: string;
-  originalChannelId: string;
+  originalChannelId?: string;
+  hs_originating_generic_channel_id?: string;
+  hs_originating_channel_instance_id?: string;
+  createdAt: string;
 }
 
 interface WebhookEvent {
@@ -57,18 +63,163 @@ const CONFIG = {
   // "1" = New, "2" = Waiting on contact, "3" = Waiting on us
   // Excludes "4" = Closed
   OPEN_TICKET_STAGES: ["1", "2", "3"],
-
-  // Known bot/AI agent IDs in HubSpot
-  // Add your actual bot IDs here - these are the IDs that conversations
-  // start with before being escalated to humans
-  BOT_AGENT_IDS: [
-    "L-67300874", // Discovered from webhook analysis - HubSpot bot/AI agent
-    // Add additional bot IDs here as discovered:
-    // "bot-12345",
-    // "chatbot-ai",
-    // "automated-agent-001"
-  ] as string[],
 };
+
+/**
+ * Get bot agent IDs from configuration
+ * @return {string[]} Array of bot agent IDs
+ */
+function getBotAgentIds(): string[] {
+  try {
+    const botIdsValue = botAgentIds.value();
+    return botIdsValue ? botIdsValue.split(",").map((id) => id.trim()) : [];
+  } catch (error) {
+    logger.warn("Failed to get bot agent IDs from config, using empty array", {
+      error,
+    });
+    return [];
+  }
+}
+
+// ===== REAL-TIME NOTIFICATION SYSTEM =====
+
+/**
+ * Send immediate alert for critical support events
+ * @param {string} type - Type of alert: 'new_chat', 'escalation', 'closure'
+ * @param {object} data - Event data
+ * @return {Promise<void>} Promise that resolves when alert is sent
+ */
+async function sendImmediateAlert(type: string, data: object): Promise<void> {
+  const timestamp = new Date().toISOString();
+  const alertMessage = formatAlertMessage(type, data, timestamp);
+
+  logger.info("🚨 SENDING IMMEDIATE ALERT", {
+    type,
+    message: alertMessage,
+    data,
+    timestamp,
+  });
+
+  // Send to console and Firestore for immediate visibility
+  const alertPromises = [
+    logCriticalAlert(type, alertMessage, data), // Always log to Firestore
+    sendConsoleAlert(alertMessage, type), // Always log prominently to console
+  ];
+
+  // Note: Slack and email notifications removed for simplified deployment
+  // Can be re-added later with proper configuration management
+
+  // Don't block the webhook response - send alerts in background
+  Promise.allSettled(alertPromises).then((results) => {
+    const successful = results.filter((r) => r.status === "fulfilled").length;
+    const failed = results.filter((r) => r.status === "rejected").length;
+
+    logger.info("Alert delivery status", {
+      type,
+      successful,
+      failed,
+      total: results.length,
+    });
+  });
+}
+
+/**
+ * Format alert message based on event type
+ * @param {string} type - Alert type
+ * @param {object} data - Event data
+ * @param {string} timestamp - Alert timestamp
+ * @return {string} Formatted alert message
+ */
+function formatAlertMessage(
+  type: string,
+  data: object,
+  timestamp: string
+): string {
+  const eventData = data as Record<string, unknown>;
+  switch (type) {
+    case "new_chat":
+      return (
+        `🆕 NEW CHAT STARTED\n` +
+        `Conversation ID: ${eventData.conversationId}\n` +
+        `Time: ${timestamp}\n` +
+        `Action Required: Monitor for escalation`
+      );
+
+    case "escalation":
+      return (
+        `🚨 ESCALATION TO HUMAN\n` +
+        `Conversation ID: ${eventData.conversationId}\n` +
+        `Assigned to: ${eventData.assignedTo}\n` +
+        `Previous: Bot (${eventData.previousAssignee})\n` +
+        `Time: ${timestamp}\n` +
+        `Action Required: IMMEDIATE RESPONSE NEEDED`
+      );
+
+    case "closure":
+      return (
+        `✅ CONVERSATION CLOSED\n` +
+        `Conversation ID: ${eventData.conversationId}\n` +
+        `Final Status: ${eventData.status}\n` +
+        `Time: ${timestamp}`
+      );
+
+    default:
+      return (
+        `📢 SUPPORT ALERT\n` +
+        `Type: ${type}\n` +
+        `Data: ${JSON.stringify(data)}\n` +
+        `Time: ${timestamp}`
+      );
+  }
+}
+
+/**
+ * Send a console alert with prominent visibility
+ * @param {string} message - Alert message
+ * @param {string} type - Alert type
+ * @return {Promise<void>} Promise that resolves when console alert is logged
+ */
+async function sendConsoleAlert(message: string, type: string): Promise<void> {
+  const alertBorder = "=".repeat(80);
+  const timestamp = new Date().toISOString();
+
+  console.log("\n" + alertBorder);
+  console.log(`🚨 SUPPORT ALERT [${type.toUpperCase()}] - ${timestamp}`);
+  console.log(alertBorder);
+  console.log(message);
+  console.log(alertBorder + "\n");
+
+  // Also use structured logging for Cloud Functions
+  logger.warn(`SUPPORT_ALERT_${type.toUpperCase()}`, { message, timestamp });
+}
+
+/**
+ * Log critical alert to Firestore for audit trail
+ * @param {string} type - Alert type
+ * @param {string} message - Alert message
+ * @param {object} data - Event data
+ * @return {Promise<void>} Promise that resolves when alert is logged
+ */
+async function logCriticalAlert(
+  type: string,
+  message: string,
+  data: object
+): Promise<void> {
+  try {
+    await db.collection("critical-alerts").add({
+      type,
+      message,
+      data,
+      timestamp: new Date().toISOString(),
+      processed: true,
+    });
+
+    logger.info("✅ Critical alert logged to Firestore", { type });
+  } catch (error) {
+    logger.error("❌ Failed to log critical alert", { error, type });
+    throw error;
+  }
+}
 
 /**
  * Get support data from HubSpot
@@ -82,6 +233,12 @@ async function getHubSpotData(token: string): Promise<SupportData> {
   }
 
   try {
+    // Debug: Log the filter we're about to use
+    logger.info("DEBUG: About to search tickets with filter:", {
+      configuredStages: CONFIG.OPEN_TICKET_STAGES,
+      filterValue: CONFIG.OPEN_TICKET_STAGES,
+    });
+
     // Using HubSpot REST API to search for tickets
     const response = await axios.post(
       "https://api.hubapi.com/crm/v3/objects/tickets/search",
@@ -109,6 +266,17 @@ async function getHubSpotData(token: string): Promise<SupportData> {
     );
 
     const tickets = response.data.results;
+
+    // Debug: Log all ticket stages to understand what we're getting
+    logger.info("DEBUG: All tickets and their stages:", {
+      totalTickets: tickets.length,
+      ticketStages: tickets.map((t: HubSpotTicket) => ({
+        stage: t.properties.hs_pipeline_stage,
+        sourceType: t.properties.source_type,
+      })),
+      currentFilter: CONFIG.OPEN_TICKET_STAGES,
+    });
+
     const openTickets = tickets.length;
     const chatTickets = tickets.filter(
       (t: HubSpotTicket) => t.properties.source_type === "CHAT"
@@ -126,8 +294,9 @@ async function getHubSpotData(token: string): Promise<SupportData> {
         other: otherTickets,
       },
       sessions: {
-        active: await getActiveChatSessionsFromHubSpot(token),
-        escalated: await getEscalatedSessions(), // Real count from hooks
+        // Use chat tickets count as active sessions since conversations API is unreliable
+        active: chatTickets, // chatTickets is already a number (.length)
+        escalated: await getEscalatedSessions(), // Only counts truly active escalations
       },
       lastUpdated: new Date().toISOString(),
       source: "hubspot",
@@ -140,10 +309,11 @@ async function getHubSpotData(token: string): Promise<SupportData> {
 
 /**
  * Get active chat sessions from HubSpot Conversations API
+ * Currently disabled - using chat tickets count instead
  * @param {string} token - HubSpot access token
  * @return {Promise<number|null>} Number of active chat sessions or null if unavailable
  */
-async function getActiveChatSessionsFromHubSpot(
+/* async function getActiveChatSessionsFromHubSpot(
   token: string
 ): Promise<number | null> {
   try {
@@ -157,67 +327,119 @@ async function getActiveChatSessionsFromHubSpot(
         },
         params: {
           limit: 100,
-          // You can filter by channelType if needed
-          // channelType: 'CHAT',
+          // Note: HubSpot API may not support createdAt filtering directly
+          // We'll filter the results after fetching
         },
       }
     );
+
     // Filter for active chat threads
     const threads = response.data.results || [];
     logger.info(
       "HubSpot Conversations API response sample:",
       JSON.stringify(threads.slice(0, 3), null, 2)
     );
-    // Only count threads that are Live Chat and currently open
-    // Live Chat channelId is "1000" (from user-provided mapping)
-    const activeChats = threads.filter((thread: HubSpotThread) => {
-      return thread.status === "OPEN" && thread.originalChannelId === "1000";
+
+    // Filter for recent conversations (last 7 days) and active chats
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    logger.info("DEBUG: About to filter conversations", {
+      totalThreads: threads.length,
+      sevenDaysThreshold: sevenDaysAgo.toISOString(),
     });
-    logger.info("Filtered active chat sessions:", activeChats.length);
-    return activeChats.length;
+
+    const recentAndActiveChats = threads.filter((thread: HubSpotThread) => {
+      const createdAt = new Date(thread.createdAt);
+      const isRecent = createdAt > sevenDaysAgo;
+      const isOpen = thread.status === "OPEN";
+      // Temporarily remove channel filter to see all open conversations
+      // const isLiveChat = thread.originalChannelId === "1000";
+
+      // Log ALL conversations for debugging
+      logger.info(`DEBUG: Conversation ${thread.id}:`, {
+        createdAt: thread.createdAt,
+        status: thread.status,
+        originalChannelId: thread.originalChannelId,
+        hs_originating_generic_channel_id:
+          thread.hs_originating_generic_channel_id,
+        hs_originating_channel_instance_id:
+          thread.hs_originating_channel_instance_id,
+        isRecent,
+        isOpen,
+        willInclude: isRecent && isOpen, // Remove channel filter temporarily
+      });
+
+      return isRecent && isOpen; // Simplified filter - just recent and open
+    });
+
+    logger.info("Filtered active chat sessions:", recentAndActiveChats.length);
+    return recentAndActiveChats.length;
   } catch (error) {
     logger.error("Error fetching active chat sessions from HubSpot:", error);
     return null; // Return null to indicate unavailable data
   }
-}
+} */
 
 /**
  * Get sessions escalated to human agents (only currently active ones)
  */
 async function getEscalatedSessions(): Promise<number | null> {
   try {
-    // Simplified approach: Get current escalated count from stored data
-    // Avoids complex Firestore composite index requirements
-    const doc = await db.collection("support").doc("current").get();
-
-    if (doc.exists) {
-      const currentData = doc.data() as SupportData;
-      const storedCount = currentData.sessions?.escalated;
-      if (typeof storedCount === "number") {
-        return storedCount;
-      }
-    }
-
-    // If no stored data, try simple query without time filter
+    // Query for active escalated conversations
+    // Only count conversations that are:
+    // 1. escalated: true
+    // 2. escalationCounted: true
+    // 3. status is explicitly "OPEN" (not "CLOSED" and not undefined)
     try {
       const activeEscalations = await db
         .collection("conversations")
         .where("escalated", "==", true)
         .where("escalationCounted", "==", true)
-        .limit(10) // Small limit to avoid performance issues
         .get();
 
-      const escalationCount = activeEscalations.size;
-      
-      logger.info("Current escalated sessions count", {
+      // Filter for conversations that are explicitly OPEN and recent
+      const openEscalations = activeEscalations.docs.filter((doc) => {
+        const data = doc.data();
+
+        // Must have explicit OPEN status (not undefined or CLOSED)
+        if (data.status !== "OPEN") {
+          return false;
+        }
+
+        // Exclude very old conversations (more than 24 hours old)
+        // This ensures we only count truly recent escalations
+        if (data.lastUpdated) {
+          const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          const lastUpdated = data.lastUpdated.toDate
+            ? data.lastUpdated.toDate()
+            : new Date(data.lastUpdated);
+          if (lastUpdated < twentyFourHoursAgo) {
+            return false;
+          }
+        }
+
+        return true; // Keep if status is OPEN and recent
+      });
+
+      const escalationCount = openEscalations.length;
+
+      logger.info("Current active escalated sessions", {
         count: escalationCount,
-        method: "simple-query",
+        totalEscalatedInDB: activeEscalations.size,
+        openEscalations: openEscalations.length,
+        conversationIds: openEscalations.map((doc) => doc.id),
+        method: "status-filtered-query",
+        statusBreakdown: activeEscalations.docs.reduce((acc, doc) => {
+          const status = doc.data().status || "undefined";
+          acc[status] = (acc[status] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>),
       });
 
       return escalationCount;
-    } catch (indexError) {
-      logger.warn("Escalation query requires index, falling back to stored value", {
-        error: indexError instanceof Error ? indexError.message : indexError,
+    } catch (queryError) {
+      logger.warn("Escalation query failed, returning null", {
+        error: queryError instanceof Error ? queryError.message : queryError,
       });
       return null; // Indicate data unavailable
     }
@@ -248,7 +470,8 @@ function getMockData(source: string): SupportData {
     lastUpdated: new Date().toISOString(),
     source,
   };
-}/**
+}
+/**
  * Store data in Firestore
  * @param {SupportData} data - Support data to store
  * @return {Promise<void>} Promise that resolves when data is stored
@@ -263,6 +486,7 @@ async function storeSupportData(data: SupportData): Promise<void> {
   }
 }
 
+// Daily health check - ensures system is working and provides baseline sync
 // Daily health check - ensures system is working and provides baseline sync
 export const collectSupportData = onSchedule(
   {
@@ -415,7 +639,10 @@ export const getWebhookActivity = onRequest(
 
 // HTTP function to get escalation debug info
 export const getEscalationDebugInfo = onRequest(
-  { cors: true },
+  {
+    cors: true,
+    secrets: [botAgentIds], // Add access to bot agent IDs secret
+  },
   async (req, res) => {
     try {
       // Get recent conversation assignments for debugging
@@ -431,9 +658,10 @@ export const getEscalationDebugInfo = onRequest(
       }));
 
       // Get configuration info
+      const configuredBotIds = getBotAgentIds();
       const config = {
-        botAgentIds: CONFIG.BOT_AGENT_IDS,
-        botAgentIdsConfigured: CONFIG.BOT_AGENT_IDS.length > 0,
+        botAgentIds: configuredBotIds,
+        botAgentIdsConfigured: configuredBotIds.length > 0,
       };
 
       res.json({
@@ -447,6 +675,70 @@ export const getEscalationDebugInfo = onRequest(
       res.status(500).json({
         success: false,
         message: "Error retrieving escalation debug info",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+);
+
+// HTTP function to debug specific escalated conversations
+export const debugSpecificConversations = onRequest(
+  { cors: true },
+  async (req, res) => {
+    try {
+      const conversationIds = [
+        "13384608972",
+        "13386663153",
+        "test-conversation-1753889127",
+        "test-conversation-1753889500",
+      ];
+      const results = [];
+
+      for (const convId of conversationIds) {
+        try {
+          const doc = await db.collection("conversations").doc(convId).get();
+          if (doc.exists) {
+            const data = doc.data();
+            const lastUpdated = data?.lastUpdated;
+            const createdAt = data?.createdAt;
+
+            results.push({
+              id: convId,
+              status: data?.status || "undefined",
+              escalated: data?.escalated,
+              escalationCounted: data?.escalationCounted,
+              lastUpdated: lastUpdated?.toDate
+                ? lastUpdated.toDate().toISOString()
+                : lastUpdated || "N/A",
+              createdAt: createdAt?.toDate
+                ? createdAt.toDate().toISOString()
+                : createdAt || "N/A",
+              exists: true,
+            });
+          } else {
+            results.push({
+              id: convId,
+              exists: false,
+            });
+          }
+        } catch (error) {
+          results.push({
+            id: convId,
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        conversations: results,
+        message: "Debug info for specific conversations retrieved successfully",
+      });
+    } catch (error) {
+      logger.error("Error debugging specific conversations:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error debugging specific conversations",
         error: error instanceof Error ? error.message : "Unknown error",
       });
     }
@@ -590,7 +882,10 @@ export const recalculateEscalations = onRequest(
 
 // HTTP function to debug specific conversation escalation - v1.1
 export const debugConversationEscalation = onRequest(
-  { cors: true },
+  {
+    cors: true,
+    secrets: [botAgentIds], // Add access to bot agent IDs secret
+  },
   async (req, res) => {
     try {
       const conversationId = req.query.conversationId as string;
@@ -609,25 +904,29 @@ export const debugConversationEscalation = onRequest(
       const conversationDoc = await conversationRef.get();
 
       // Get webhook events for this conversation
+      // Handle both string and number objectId formats
+      const numericConversationId = parseInt(conversationId, 10);
       const webhookEvents = await db
         .collection("webhook-events")
-        .where("objectId", "==", conversationId)
+        .where("objectId", "==", numericConversationId)
         .where("propertyName", "==", "assignedTo")
         .orderBy("timestamp", "asc")
         .get();
 
       const events = webhookEvents.docs.map((doc) => doc.data());
 
+      // Get bot agent IDs
+      const configuredBotIds = getBotAgentIds();
+
       // Check for bot assignments
       const botAssignments = events.filter((event) =>
-        CONFIG.BOT_AGENT_IDS.includes(event.propertyValue || "")
+        configuredBotIds.includes(event.propertyValue || "")
       );
 
       // Check for human assignments
       const humanAssignments = events.filter(
         (event) =>
-          event.propertyValue &&
-          !CONFIG.BOT_AGENT_IDS.includes(event.propertyValue)
+          event.propertyValue && !configuredBotIds.includes(event.propertyValue)
       );
 
       res.json({
@@ -643,7 +942,7 @@ export const debugConversationEscalation = onRequest(
         shouldBeEscalation:
           botAssignments.length > 0 && humanAssignments.length > 0,
         config: {
-          botAgentIds: CONFIG.BOT_AGENT_IDS,
+          botAgentIds: configuredBotIds,
         },
       });
     } catch (error) {
@@ -677,14 +976,18 @@ export const manualEscalationProcess = onRequest(
       });
 
       // Get webhook events for this conversation
+      const numericConversationId = parseInt(conversationId, 10);
       const webhookEvents = await db
         .collection("webhook-events")
-        .where("objectId", "==", conversationId)
+        .where("objectId", "==", numericConversationId)
         .where("propertyName", "==", "assignedTo")
         .orderBy("timestamp", "asc")
         .get();
 
       const events = webhookEvents.docs.map((doc) => doc.data());
+
+      // Get bot agent IDs
+      const configuredBotIds = getBotAgentIds();
 
       logger.info("📋 Retrieved webhook events", {
         conversationId,
@@ -692,7 +995,7 @@ export const manualEscalationProcess = onRequest(
         events: events.map((e) => ({
           timestamp: e.timestamp,
           propertyValue: e.propertyValue,
-          isBot: CONFIG.BOT_AGENT_IDS.includes(e.propertyValue || ""),
+          isBot: configuredBotIds.includes(e.propertyValue || ""),
         })),
       });
 
@@ -751,7 +1054,7 @@ export const manualEscalationProcess = onRequest(
 export const hubspotWebhook = onRequest(
   {
     cors: true,
-    secrets: [hubspotAccessToken],
+    secrets: [hubspotAccessToken, botAgentIds], // Include bot agent IDs configuration
   },
   async (req, res) => {
     try {
@@ -972,6 +1275,15 @@ async function handleConversationEvent(event: WebhookEvent): Promise<void> {
       objectId,
     });
 
+    // 🚨 REAL-TIME ALERT: New conversation created
+    if (subscriptionType === "conversation.creation") {
+      logger.info("🆕 NEW CONVERSATION DETECTED - SENDING IMMEDIATE ALERT");
+      await sendImmediateAlert("new_chat", {
+        conversationId: objectId,
+        subscriptionType,
+      });
+    }
+
     // Track conversation status changes for active sessions
     if (propertyName === "status") {
       logger.info("Conversation status changed", {
@@ -979,9 +1291,14 @@ async function handleConversationEvent(event: WebhookEvent): Promise<void> {
         newStatus: propertyValue,
       });
 
-      // If conversation is being closed, check if we need to decrement
+      // 🚨 REAL-TIME ALERT: Conversation closed
       if (propertyValue === "CLOSED") {
-        await handleConversationClosure(objectId);
+        logger.info("✅ CONVERSATION CLOSED - SENDING IMMEDIATE ALERT");
+        await sendImmediateAlert("closure", {
+          conversationId: objectId,
+          status: propertyValue,
+        });
+        await handleConversationClosure(String(objectId));
       }
     }
 
@@ -1019,32 +1336,38 @@ async function handleConversationEvent(event: WebhookEvent): Promise<void> {
 async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
   const { objectId, propertyValue } = event;
 
+  // Convert objectId to string for Firestore document ID
+  const conversationId = String(objectId);
+
   try {
     logger.info("=== ESCALATION CHECK START ===", {
-      conversationId: objectId,
+      conversationId,
       assignedTo: propertyValue,
       timestamp: new Date().toISOString(),
     });
 
-    // If no BOT_AGENT_IDS are configured, log a warning and skip detection
-    if (CONFIG.BOT_AGENT_IDS.length === 0) {
+    // Get bot agent IDs from configuration
+    const configuredBotIds = getBotAgentIds();
+
+    // If no bot agent IDs are configured, log a warning and skip detection
+    if (configuredBotIds.length === 0) {
       logger.warn("No bot agent IDs configured for escalation detection");
       return;
     }
 
     logger.info("Checking assignment change for escalation", {
-      conversationId: objectId,
+      conversationId,
       newAssignee: propertyValue,
-      isBot: CONFIG.BOT_AGENT_IDS.includes(propertyValue || ""),
-      configuredBots: CONFIG.BOT_AGENT_IDS,
+      isBot: configuredBotIds.includes(propertyValue || ""),
+      configuredBots: configuredBotIds,
     });
 
-    const conversationRef = db.collection("conversations").doc(objectId);
+    const conversationRef = db.collection("conversations").doc(conversationId);
 
     // Handle bot assignment - just track it
-    if (propertyValue && CONFIG.BOT_AGENT_IDS.includes(propertyValue)) {
+    if (propertyValue && configuredBotIds.includes(propertyValue)) {
       logger.info("🤖 BOT ASSIGNMENT DETECTED", {
-        conversationId: objectId,
+        conversationId,
         botId: propertyValue,
       });
 
@@ -1054,16 +1377,17 @@ async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
             currentAssignee: propertyValue,
             lastUpdated: new Date().toISOString(),
             hasBotAssignment: true, // Track that this conversation had a bot
+            status: "OPEN", // Mark as open when bot is assigned
           },
           { merge: true }
         );
         logger.info("✅ Bot assignment stored successfully", {
-          conversationId: objectId,
+          conversationId,
           botId: propertyValue,
         });
       } catch (firestoreError) {
         logger.error("❌ Failed to store bot assignment", {
-          conversationId: objectId,
+          conversationId,
           botId: propertyValue,
           error: firestoreError,
         });
@@ -1073,9 +1397,9 @@ async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
     }
 
     // Handle human assignment - check if it's an escalation
-    if (propertyValue && !CONFIG.BOT_AGENT_IDS.includes(propertyValue)) {
+    if (propertyValue && !configuredBotIds.includes(propertyValue)) {
       logger.info("👤 HUMAN ASSIGNMENT DETECTED", {
-        conversationId: objectId,
+        conversationId,
         humanAgent: propertyValue,
       });
 
@@ -1084,13 +1408,13 @@ async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
       try {
         conversationDoc = await conversationRef.get();
         logger.info("📄 Conversation document retrieved", {
-          conversationId: objectId,
+          conversationId,
           exists: conversationDoc.exists,
           data: conversationDoc.exists ? conversationDoc.data() : null,
         });
       } catch (firestoreError) {
         logger.error("❌ Failed to retrieve conversation document", {
-          conversationId: objectId,
+          conversationId,
           error: firestoreError,
         });
         throw firestoreError;
@@ -1105,7 +1429,7 @@ async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
         const hasBotAssignment = conversationData?.hasBotAssignment || false;
 
         logger.info("🔍 Analyzing existing conversation", {
-          conversationId: objectId,
+          conversationId,
           previousAssignee,
           hasBotAssignment,
           allData: conversationData,
@@ -1115,21 +1439,20 @@ async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
         // 1. Previous assignee was a bot, OR
         // 2. Conversation previously had a bot assignment (race condition)
         if (
-          (previousAssignee &&
-            CONFIG.BOT_AGENT_IDS.includes(previousAssignee)) ||
+          (previousAssignee && configuredBotIds.includes(previousAssignee)) ||
           hasBotAssignment
         ) {
           isEscalation = true;
           escalatedFrom = previousAssignee || "unknown-bot";
           logger.info("✅ ESCALATION FROM EXISTING DATA", {
-            conversationId: objectId,
+            conversationId,
             previousAssignee,
             hasBotAssignment,
             escalatedFrom,
           });
         } else {
           logger.info("❌ No escalation from existing data", {
-            conversationId: objectId,
+            conversationId,
             previousAssignee,
             hasBotAssignment,
             reason: "No bot assignment found in conversation data",
@@ -1137,28 +1460,30 @@ async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
         }
       } else {
         logger.info("📝 New conversation - checking webhook history", {
-          conversationId: objectId,
+          conversationId,
         });
 
         // New conversation - check recent webhook events for bot assignment
         // This handles race condition where human assignment comes first
         try {
-          const recentBotAssignment = await checkRecentBotAssignment(objectId);
+          const recentBotAssignment = await checkRecentBotAssignment(
+            conversationId
+          );
           if (recentBotAssignment) {
             isEscalation = true;
             escalatedFrom = recentBotAssignment;
             logger.info("✅ ESCALATION FROM WEBHOOK HISTORY", {
-              conversationId: objectId,
+              conversationId,
               botFoundInHistory: recentBotAssignment,
             });
           } else {
             logger.info("❌ No bot assignment found in webhook history", {
-              conversationId: objectId,
+              conversationId,
             });
           }
         } catch (webhookError) {
           logger.error("❌ Failed to check webhook history", {
-            conversationId: objectId,
+            conversationId,
             error: webhookError,
           });
           throw webhookError;
@@ -1167,9 +1492,19 @@ async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
 
       if (isEscalation) {
         logger.info("🚨 ESCALATION CONFIRMED - PROCESSING", {
-          conversationId: objectId,
+          conversationId,
           fromBot: escalatedFrom,
           toHuman: propertyValue,
+        });
+
+        // 🚨 REAL-TIME ALERT: Critical escalation to human
+        logger.info(
+          "🚨 SENDING CRITICAL ESCALATION ALERT - IMMEDIATE RESPONSE NEEDED"
+        );
+        await sendImmediateAlert("escalation", {
+          conversationId,
+          assignedTo: propertyValue,
+          previousAssignee: escalatedFrom,
         });
 
         try {
@@ -1194,24 +1529,25 @@ async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
               escalatedTo: propertyValue,
               escalationCounted: true, // Currently counting toward escalations
               hasBotAssignment: true,
+              status: "OPEN", // Explicitly mark as open for accurate counting
             },
             { merge: true }
           );
           logger.info("✅ Escalation data stored successfully", {
-            conversationId: objectId,
+            conversationId,
             escalatedFrom,
             escalatedTo: propertyValue,
           });
         } catch (escalationStoreError) {
           logger.error("❌ Failed to store escalation data", {
-            conversationId: objectId,
+            conversationId,
             error: escalationStoreError,
           });
           throw escalationStoreError;
         }
       } else {
         logger.info("📝 No escalation - storing human assignment", {
-          conversationId: objectId,
+          conversationId,
           humanAgent: propertyValue,
         });
 
@@ -1221,16 +1557,17 @@ async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
             {
               currentAssignee: propertyValue,
               lastUpdated: new Date().toISOString(),
+              status: "OPEN", // Mark as open for human assignment too
             },
             { merge: true }
           );
           logger.info("✅ Human assignment stored successfully", {
-            conversationId: objectId,
+            conversationId,
             assignee: propertyValue,
           });
         } catch (assignmentStoreError) {
           logger.error("❌ Failed to store human assignment", {
-            conversationId: objectId,
+            conversationId,
             error: assignmentStoreError,
           });
           throw assignmentStoreError;
@@ -1239,12 +1576,12 @@ async function checkForBotEscalation(event: WebhookEvent): Promise<void> {
     }
 
     logger.info("=== ESCALATION CHECK COMPLETE ===", {
-      conversationId: objectId,
+      conversationId,
       success: true,
     });
   } catch (error) {
     logger.error("❌ ESCALATION CHECK FAILED", {
-      conversationId: objectId,
+      conversationId,
       assignedTo: propertyValue,
       error: error instanceof Error ? error.message : error,
       stack: error instanceof Error ? error.stack : undefined,
@@ -1268,9 +1605,11 @@ async function checkRecentBotAssignment(
     });
 
     // Look for recent bot assignment events for this conversation
+    // Handle both string and number objectId formats
+    const numericConversationId = parseInt(conversationId, 10);
     const recentEvents = await db
       .collection("webhook-events")
-      .where("objectId", "==", conversationId)
+      .where("objectId", "==", numericConversationId)
       .where("propertyName", "==", "assignedTo")
       .orderBy("timestamp", "desc")
       .limit(10)
@@ -1283,16 +1622,20 @@ async function checkRecentBotAssignment(
 
     for (const doc of recentEvents.docs) {
       const event = doc.data();
+
+      // Get bot agent IDs
+      const configuredBotIds = getBotAgentIds();
+
       logger.info("🔎 Examining webhook event", {
         conversationId,
         eventPropertyValue: event.propertyValue,
         eventTimestamp: event.timestamp,
-        isBot: CONFIG.BOT_AGENT_IDS.includes(event.propertyValue || ""),
+        isBot: configuredBotIds.includes(event.propertyValue || ""),
       });
 
       if (
         event.propertyValue &&
-        CONFIG.BOT_AGENT_IDS.includes(event.propertyValue)
+        configuredBotIds.includes(event.propertyValue)
       ) {
         logger.info("✅ Found recent bot assignment in webhook events", {
           conversationId,
@@ -1452,3 +1795,170 @@ async function incrementEscalatedSessions(): Promise<void> {
     throw error;
   }
 }
+
+// HTTP function to clear all conversation data and start fresh
+export const clearAllConversationData = onRequest(
+  { cors: true },
+  async (req, res) => {
+    try {
+      // Get all conversations
+      const conversationsSnapshot = await db.collection("conversations").get();
+
+      if (conversationsSnapshot.empty) {
+        res.json({
+          success: true,
+          message: "No conversations found to delete",
+          deletedCount: 0,
+        });
+        return;
+      }
+
+      // Delete all conversations in batches
+      const batch = db.batch();
+      const conversationIds: string[] = [];
+
+      conversationsSnapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+        conversationIds.push(doc.id);
+      });
+
+      await batch.commit();
+
+      // Also clear webhook events older than 24 hours
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const oldWebhookEvents = await db
+        .collection("webhook-events")
+        .where("timestamp", "<", oneDayAgo.toISOString())
+        .get();
+
+      if (!oldWebhookEvents.empty) {
+        const webhookBatch = db.batch();
+        oldWebhookEvents.docs.forEach((doc) => {
+          webhookBatch.delete(doc.ref);
+        });
+        await webhookBatch.commit();
+      }
+
+      // Reset support data counters to zero
+      await db
+        .collection("support-data")
+        .doc("current")
+        .set({
+          tickets: {
+            open: 0,
+            chat: 0,
+            email: 0,
+            other: 0,
+          },
+          sessions: {
+            active: 0,
+            escalated: 0,
+          },
+          lastUpdated: new Date().toISOString(),
+          source: "data-reset",
+        });
+
+      logger.info("🧹 All conversation data cleared successfully", {
+        deletedConversations: conversationsSnapshot.size,
+        deletedWebhookEvents: oldWebhookEvents.size,
+        conversationIds: conversationIds,
+      });
+
+      res.json({
+        success: true,
+        message: "All conversation data cleared successfully",
+        deletedConversations: conversationsSnapshot.size,
+        deletedWebhookEvents: oldWebhookEvents.size,
+        conversationIds: conversationIds,
+      });
+    } catch (error) {
+      logger.error("❌ Error clearing conversation data:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error clearing conversation data",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+);
+
+// Debug endpoint to show conversation details
+export const debugConversationDetails = onRequest(
+  { cors: true, secrets: [hubspotAccessToken] },
+  async (req, res) => {
+    try {
+      const token = hubspotAccessToken.value();
+
+      // Fetch conversations from HubSpot
+      const response = await axios.get(
+        "https://api.hubapi.com/conversations/v3/conversations/threads",
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          params: {
+            limit: 10,
+          },
+        }
+      );
+
+      const threads = response.data.results || [];
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      type ConversationAnalysis = {
+        id: string;
+        createdAt: string;
+        status: string;
+        originalChannelId: string;
+        filters: {
+          isRecent: boolean;
+          isOpen: boolean;
+          isLiveChat: boolean;
+          wouldCount: boolean;
+        };
+      };
+
+      const conversationAnalysis: ConversationAnalysis[] = threads.map(
+        (thread: HubSpotThread) => {
+          const createdAt = new Date(thread.createdAt);
+          const isRecent = createdAt > yesterday;
+          const isOpen = thread.status === "OPEN";
+          const isLiveChat = thread.originalChannelId === "1000";
+
+          return {
+            id: thread.id,
+            createdAt: thread.createdAt,
+            status: thread.status,
+            originalChannelId: thread.originalChannelId,
+            filters: {
+              isRecent,
+              isOpen,
+              isLiveChat,
+              wouldCount: isRecent && isOpen && isLiveChat,
+            },
+          };
+        }
+      );
+
+      const activeConversations = conversationAnalysis.filter(
+        (conversation: ConversationAnalysis) => conversation.filters.wouldCount
+      );
+
+      res.json({
+        success: true,
+        totalConversations: threads.length,
+        yesterdayThreshold: yesterday.toISOString(),
+        conversations: conversationAnalysis,
+        activeCount: activeConversations.length,
+      });
+    } catch (error) {
+      logger.error("Error debugging conversation details:", error);
+      res.status(500).json({
+        success: false,
+        message: "Error fetching conversation details",
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+);
