@@ -7,6 +7,7 @@ import {
   User,
   Volume2,
   VolumeX,
+  RefreshCw,
 } from "lucide-react";
 import axios from "axios";
 import { API_ENDPOINTS } from "./config/api";
@@ -125,6 +126,51 @@ const App = () => {
     }
   };
 
+  // Enhanced force refresh for PWA with aggressive cache clearing
+  const forceRefresh = async () => {
+    console.log("🔄 Force refreshing PWA with aggressive cache clearing...");
+
+    try {
+      // Clear all caches
+      if ("caches" in window) {
+        const cacheNames = await caches.keys();
+        console.log("🗑️ Clearing caches:", cacheNames);
+        await Promise.all(
+          cacheNames.map((cacheName) => {
+            console.log("🗑️ Deleting cache:", cacheName);
+            return caches.delete(cacheName);
+          })
+        );
+      }
+
+      // Clear localStorage and sessionStorage
+      if (typeof Storage !== "undefined") {
+        localStorage.clear();
+        sessionStorage.clear();
+        console.log("🗑️ Cleared local and session storage");
+      }
+
+      // Unregister service workers
+      if ("serviceWorker" in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (let registration of registrations) {
+          console.log("🗑️ Unregistering service worker");
+          await registration.unregister();
+        }
+      }
+
+      // Add cache-busting timestamp and reload
+      const timestamp = Date.now();
+      console.log("🔄 Reloading with cache-bust timestamp:", timestamp);
+      window.location.href =
+        window.location.href.split("?")[0] + "?cacheBust=" + timestamp;
+    } catch (error) {
+      console.error("❌ Error during cache clearing:", error);
+      // Fallback to simple reload
+      window.location.reload(true);
+    }
+  };
+
   useEffect(() => {
     fetchSupportData();
 
@@ -133,6 +179,48 @@ const App = () => {
 
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // PWA detection useEffect
+  useEffect(() => {
+    const detectPWA = () => {
+      const isStandalone = window.matchMedia(
+        "(display-mode: standalone)"
+      ).matches;
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const isInWebAppiOS = window.navigator.standalone === true;
+      const isAndroidPWA = window.matchMedia(
+        "(display-mode: standalone)"
+      ).matches;
+
+      const isPWA = isStandalone || isInWebAppiOS || isAndroidPWA;
+
+      console.log("🔍 PWA Detection:", {
+        isStandalone,
+        isIOS,
+        isInWebAppiOS,
+        isAndroidPWA,
+        isPWA,
+        userAgent: navigator.userAgent,
+      });
+
+      if (isPWA) {
+        document.body.classList.add("pwa-detected");
+        console.log("✅ PWA mode detected - added pwa-detected class");
+      } else {
+        document.body.classList.remove("pwa-detected");
+        console.log("❌ PWA mode not detected");
+      }
+    };
+
+    detectPWA();
+
+    // Also detect on orientation change (mobile)
+    window.addEventListener("orientationchange", detectPWA);
+
+    return () => {
+      window.removeEventListener("orientationchange", detectPWA);
+    };
   }, []);
 
   const formatLastUpdated = (timestamp) => {
@@ -315,8 +403,17 @@ const App = () => {
             </div>
 
             <div className="last-updated">
-              📊 <strong>{formatLastUpdated(supportData.lastUpdated)}</strong> •
-              🔄 {formatLastUpdated(lastChecked)}
+              <div className="last-updated-content">
+                📊 <strong>{formatLastUpdated(supportData.lastUpdated)}</strong>{" "}
+                • 🔄 {formatLastUpdated(lastChecked)}
+              </div>
+              <button
+                className="last-updated-refresh"
+                onClick={forceRefresh}
+                title="Force refresh (clears cache)"
+              >
+                <RefreshCw size={16} />
+              </button>
             </div>
           </>
         )}

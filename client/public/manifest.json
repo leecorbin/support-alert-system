@@ -1,6 +1,7 @@
 {
-  "short_name": "Support Dashboard",
+  "short_name": "Support Alerts",
   "name": "Support Alert Dashboard",
+  "description": "Real-time support ticket monitoring with audio alerts",
   "icons": [
     {
       "src": "favicon.ico",
@@ -10,6 +11,12 @@
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "portrait-primary",
+  "theme_color": "#4a4d56",
+  "background_color": "#4a4d56",
+  "categories": ["productivity", "business"],
+  "scope": "/",
+  "lang": "en",
+  "prefer_related_applications": false
 }

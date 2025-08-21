@@ -4,44 +4,265 @@
   box-sizing: border-box;
 }
 
+/* Force background everywhere - never white */
+html,
+body,
+#root,
+.app {
+  background: linear-gradient(
+    135deg,
+    #4a4d56 0%,
+    #6b6f7a 50%,
+    #4a4d56 100%
+  ) !important;
+  width: 100%;
+  height: 100%;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+/* Only apply PWA restrictions when in standalone mode */
+@media all and (display-mode: standalone) {
+  html,
+  body {
+    overflow: hidden !important; /* Prevent scrolling */
+    position: fixed !important; /* Lock position on mobile */
+    -webkit-overflow-scrolling: none !important;
+
+    /* Prevent pull-to-refresh and rubber band scrolling */
+    overscroll-behavior: none !important;
+    -webkit-overscroll-behavior: none !important;
+    touch-action: manipulation !important;
+  }
+}
+
+#root {
+  height: 100vh;
+  height: 100dvh; /* Dynamic viewport height */
+  position: relative;
+}
+
+/* Only lock #root overflow in PWA mode */
+@media all and (display-mode: standalone) {
+  #root {
+    overflow: hidden !important;
+  }
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
     "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  min-height: 100vh;
   transition: background 0.5s ease;
+  /* Default background in case classes don't apply */
+  background: linear-gradient(135deg, #4a4d56 0%, #6b6f7a 50%, #4a4d56 100%);
 }
 
 /* Default state - everything clear */
 body.bg-clear {
-  background: linear-gradient(135deg, #4a4d56 0%, #6b6f7a 50%, #4a4d56 100%);
+  background: linear-gradient(
+    135deg,
+    #4a4d56 0%,
+    #6b6f7a 50%,
+    #4a4d56 100%
+  ) !important;
 }
 
 /* Active tickets - some work to do */
 body.bg-active {
-  background: linear-gradient(135deg, #279a93 0%, #1e7a74 50%, #185e5a 100%);
+  background: linear-gradient(
+    135deg,
+    #279a93 0%,
+    #1e7a74 50%,
+    #185e5a 100%
+  ) !important;
 }
 
 /* Escalated - urgent attention needed */
 body.bg-escalated {
-  background: linear-gradient(135deg, #e97677 0%, #d14b4d 50%, #b53c3e 100%);
+  background: linear-gradient(
+    135deg,
+    #e97677 0%,
+    #d14b4d 50%,
+    #b53c3e 100%
+  ) !important;
 }
 
 /* Loading state */
 body.bg-loading {
-  background: linear-gradient(135deg, #4a4d56 0%, #6b6f7a 50%, #4a4d56 100%);
+  background: linear-gradient(
+    135deg,
+    #4a4d56 0%,
+    #6b6f7a 50%,
+    #4a4d56 100%
+  ) !important;
 }
 
 .app {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh; /* Dynamic viewport height for mobile */
   padding: 20px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 100vh;
+  max-height: 100dvh;
+}
+
+/* Universal mobile fixes - apply to ALL mobile devices regardless of PWA status */
+@media (max-width: 768px) {
+  * {
+    box-sizing: border-box !important;
+  }
+
+  html {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    background: linear-gradient(
+      135deg,
+      #4a4d56 0%,
+      #6b6f7a 50%,
+      #4a4d56 100%
+    ) !important;
+  }
+
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    background: linear-gradient(
+      135deg,
+      #4a4d56 0%,
+      #6b6f7a 50%,
+      #4a4d56 100%
+    ) !important;
+  }
+
+  #root {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    background: linear-gradient(
+      135deg,
+      #4a4d56 0%,
+      #6b6f7a 50%,
+      #4a4d56 100%
+    ) !important;
+  }
+
+  .app {
+    margin: 0 !important;
+    padding: 0 !important;
+    padding-top: 15px !important;
+    padding-bottom: 8px !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    box-sizing: border-box !important;
+    background: linear-gradient(
+      135deg,
+      #4a4d56 0%,
+      #6b6f7a 50%,
+      #4a4d56 100%
+    ) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+
+  .header {
+    margin-bottom: 5px !important;
+    padding: 0 12px !important;
+  }
+
+  /* Add padding to content areas, not the main app container */
+  .status-bar {
+    margin-left: 12px !important;
+    margin-right: 12px !important;
+    width: calc(100% - 24px) !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+    box-sizing: border-box !important;
+  }
+
+  .metrics-grid,
+  .sessions-grid {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  /* Override all card padding for mobile */
+  .metric-card {
+    padding: 12px 8px !important;
+    margin: 2px 0 !important;
+  }
+
+  .session-card {
+    padding: 10px 8px !important;
+    margin: 2px 0 !important;
+  }
+
+  .last-updated {
+    padding: 8px 12px !important;
+    margin-top: 5px !important;
+  }
+
+  /* Override any other padding that might be applied */
+  .status-indicator {
+    margin: 0 !important;
+  }
+
+  .header-controls {
+    margin: 0 !important;
+  }
+
+  /* Fix grid layouts for mobile - this is the key fix! */
+  .metrics-grid {
+    grid-template-columns: 1fr !important;
+    gap: 4px !important;
+    margin-bottom: 10px !important;
+  }
+
+  /* Remove any default grid behavior that might add padding */
+  .metrics-grid,
+  .sessions-grid {
+    display: grid !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* This is the key fix - override dashboard centering! */
+  .dashboard {
+    max-width: 100% !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+}
+
+/* Remove all PWA-only restrictions since they weren't working */
+/* Apply to ALL mobile devices */
+
+/* PWA desktop/tablet - maintain normal layout */
+@media all and (display-mode: standalone) and (min-width: 769px) {
+  .app {
+    padding: 20px;
+    padding-top: max(env(safe-area-inset-top), 20px);
+  }
 }
 
 .header {
   text-align: center;
-  margin-bottom: 30px;
+  margin-bottom: 20px;
   color: white;
 }
 
@@ -50,6 +271,21 @@ body.bg-loading {
   font-weight: 700;
   margin-bottom: 10px;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Mobile responsive header */
+@media (max-width: 768px) {
+  .header h1 {
+    font-size: 2rem;
+  }
+
+  /* Additional spacing for PWA mode on mobile */
+  @media all and (display-mode: standalone) {
+    .header {
+      margin-top: 5px; /* Minimal space below status bar */
+      margin-bottom: 15px;
+    }
+  }
 }
 
 /* Status bar with connection and sound controls */
@@ -113,6 +349,35 @@ body.bg-loading {
   background: rgba(239, 68, 68, 0.2);
   border-color: rgba(239, 68, 68, 0.5);
   color: #ef4444;
+}
+
+/* Refresh button styles */
+.refresh-button {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px 3px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  background: rgba(75, 85, 99, 0.2);
+  color: white;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 8px;
+  font-weight: 500;
+  white-space: nowrap;
+  min-height: 16px;
+  flex-shrink: 0;
+}
+
+.refresh-button:hover {
+  background: rgba(75, 85, 99, 0.4);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-1px);
+}
+
+.refresh-button:active {
+  transform: scale(0.95);
 }
 
 /* Mobile responsive header - only stack on extremely tiny screens */
@@ -187,9 +452,16 @@ body.bg-loading {
 
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 20px;
   margin-bottom: 30px;
+}
+
+/* Ensure two columns on larger screens */
+@media (min-width: 600px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .metric-card {
@@ -243,13 +515,42 @@ body.bg-loading {
 }
 
 .last-updated {
-  text-align: center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   color: rgba(255, 255, 255, 0.8);
   font-size: 0.9rem;
   background: rgba(255, 255, 255, 0.1);
   padding: 15px;
   border-radius: 10px;
   backdrop-filter: blur(10px);
+}
+
+.last-updated-content {
+  flex: 1;
+  text-align: center;
+}
+
+.last-updated-refresh {
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.last-updated-refresh:hover {
+  background: rgba(255, 255, 255, 0.2);
+  transform: scale(1.05);
+}
+
+.last-updated-refresh:active {
+  transform: scale(0.95);
 }
 
 .error-message {
@@ -287,20 +588,140 @@ body.bg-loading {
   }
 }
 
-@media (max-width: 768px) {
+/* Mobile-only styles for very small screens */
+@media (max-width: 480px) {
   .header h1 {
     font-size: 2rem;
   }
 
   .metrics-grid {
     grid-template-columns: 1fr;
+    gap: 15px;
   }
 
   .metric-card {
-    padding: 20px;
+    padding: 15px;
   }
 
   .app {
-    padding: 15px;
+    padding: 12px;
+  }
+}
+
+/* Tablet and narrow desktop styles */
+@media (max-width: 768px) and (min-width: 481px) {
+  .header h1 {
+    font-size: 2.2rem;
+  }
+
+  .app {
+    padding: 18px;
+  }
+}
+
+/* PWA-specific fixes for white bar - force background everywhere including home indicator */
+@media all and (display-mode: standalone) {
+  /* Force the default gradient EVERYWHERE including home indicator area */
+  html,
+  body,
+  #root,
+  .app {
+    background: linear-gradient(
+      135deg,
+      #4a4d56 0%,
+      #6b6f7a 50%,
+      #4a4d56 100%
+    ) !important;
+    height: 100% !important;
+    min-height: 100vh !important;
+    min-height: 100svh !important;
+  }
+
+  html {
+    overflow: hidden !important;
+    /* Extend background to cover home indicator */
+    padding-bottom: env(safe-area-inset-bottom) !important;
+  }
+
+  body {
+    overflow: hidden !important;
+    /* Ensure body extends to home indicator */
+    padding-bottom: env(safe-area-inset-bottom) !important;
+  }
+
+  #root {
+    overflow: hidden !important;
+    /* Ensure root extends to home indicator */
+    padding-bottom: env(safe-area-inset-bottom) !important;
+  }
+
+  .app {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    /* Ensure app content doesn't hide behind home indicator */
+    padding-bottom: max(env(safe-area-inset-bottom), 20px) !important;
+  }
+
+  /* Force all other elements to be transparent so body shows through */
+  .dashboard,
+  .metrics-grid,
+  .last-updated {
+    background: transparent !important;
+  }
+
+  /* Ensure last-updated doesn't create space above home indicator */
+  .last-updated {
+    margin-bottom: 0 !important;
+  }
+}
+
+/* Also ensure body classes can still override with higher specificity */
+@media all and (display-mode: standalone) {
+  body.bg-clear,
+  html body.bg-clear,
+  body.bg-clear #root,
+  body.bg-clear .app {
+    background: linear-gradient(
+      135deg,
+      #4a4d56 0%,
+      #6b6f7a 50%,
+      #4a4d56 100%
+    ) !important;
+  }
+
+  body.bg-active,
+  html body.bg-active,
+  body.bg-active #root,
+  body.bg-active .app {
+    background: linear-gradient(
+      135deg,
+      #279a93 0%,
+      #1e7a74 50%,
+      #185e5a 100%
+    ) !important;
+  }
+
+  body.bg-escalated,
+  html body.bg-escalated,
+  body.bg-escalated #root,
+  body.bg-escalated .app {
+    background: linear-gradient(
+      135deg,
+      #e97677 0%,
+      #d14b4d 50%,
+      #b53c3e 100%
+    ) !important;
+  }
+
+  body.bg-loading,
+  html body.bg-loading,
+  body.bg-loading #root,
+  body.bg-loading .app {
+    background: linear-gradient(
+      135deg,
+      #4a4d56 0%,
+      #6b6f7a 50%,
+      #4a4d56 100%
+    ) !important;
   }
 }
